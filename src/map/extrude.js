@@ -19,7 +19,7 @@ const sideFragmentShader = /* glsl */ `
     float t = fract(vUv.y - uTime * 0.18);
     float band = exp(-pow((t - 0.5) * 7.0, 2.0));
     vec3 col = mix(uColor, uGlow, band);
-    float intensity = 0.35 + band * 1.4;
+    float intensity = 0.5 + band * 0.85;
     gl_FragColor = vec4(col * intensity, 1.0);
   }
 `
@@ -61,14 +61,57 @@ function buildShapes(feature, projection, W, H) {
   return shapes
 }
 
+// 手动计算 GeoJSON 的平面经纬度包围盒
+// 注意：不能用 d3 的 fitSize/geoBounds —— 它们按"球面多边形"语义解析环方向，
+// DataV 数据的 winding 与之相反，会把每个 feature 当作覆盖全球，导致地图缩成一小条
+function computeLonLatBBox(geojson) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  const walk = (coords) => {
+    if (typeof coords[0] === 'number') {
+      const [lon, lat] = coords
+      if (lon < -180 || lon > 180 || lat < -90 || lat > 90) return // 丢弃异常占位坐标
+      if (lon < minX) minX = lon
+      if (lon > maxX) maxX = lon
+      if (lat < minY) minY = lat
+      if (lat > maxY) maxY = lat
+    } else {
+      for (const c of coords) walk(c)
+    }
+  }
+  ;(geojson.features || []).forEach((f) => f.geometry && walk(f.geometry.coordinates))
+  return [
+    [minX, minY],
+    [maxX, maxY]
+  ]
+}
+
+// 墨卡托投影手动适配：将 bbox 缩放居中到 [0,W]×[0,H]
+function createFittedProjection(geojson, W, H) {
+  const raw = geoMercator().scale(1).translate([0, 0])
+  const clampLat = (lat) => Math.max(-85, Math.min(85, lat))
+  const [[minLon, minLat], [maxLon, maxLat]] = computeLonLatBBox(geojson)
+
+  const corners = [
+    raw([minLon, clampLat(maxLat)]),
+    raw([maxLon, clampLat(minLat)])
+  ]
+  const x0 = corners[0][0], x1 = corners[1][0]
+  const y0 = corners[0][1], y1 = corners[1][1] // mercator y 越北越小
+
+  const k = Math.min(W / (x1 - x0), H / (y1 - y0))
+  const tx = W / 2 - (k * (x0 + x1)) / 2
+  const ty = H / 2 - (k * (y0 + y1)) / 2
+  return geoMercator().scale(k).translate([tx, ty])
+}
+
 // 把 GeoJSON FeatureCollection 拉伸为 3D 地图组
 // 返回 { group, sideMaterials, featureGroups }
 export function createExtrudedMap(geojson, opts = {}) {
   const W = opts.width || 1024
   const H = opts.height || 1024
-  const depth = opts.depth || 1200
+  const depth = opts.depth || 70
 
-  const projection = geoMercator().fitSize([W, H], geojson)
+  const projection = createFittedProjection(geojson, W, H)
 
   const group = new THREE.Group()
   // rotX = -90°：拉伸的局部 +z 变为世界 +y（向上立起），地图平铺在 xz 平面
@@ -82,8 +125,9 @@ export function createExtrudedMap(geojson, opts = {}) {
     const shapes = buildShapes(feature, projection, W, H)
     if (!shapes.length) return
 
-    const hue = (idx * 47) % 360
-    const baseColor = new THREE.Color().setHSL(hue / 360, 0.62, 0.55)
+    // 科技蓝青色系：色相在 190~235 间小幅错开，饱和度/亮度统一
+    const hue = 190 + (idx * 13) % 45
+    const baseColor = new THREE.Color().setHSL(hue / 360, 0.68, 0.55)
 
     const capMat = new THREE.MeshStandardMaterial({
       color: baseColor,
@@ -112,7 +156,8 @@ export function createExtrudedMap(geojson, opts = {}) {
         bevelEnabled: false,
         steps: 1
       })
-      const mesh = new THREE.Mesh(geo, [sideMat, capMat])
+      // ExtrudeGeometry 材质组约定：0 = 顶/底盖（cap），1 = 侧面（side）
+      const mesh = new THREE.Mesh(geo, [capMat, sideMat])
       mesh.userData.feature = feature
       featureGroup.add(mesh)
     })

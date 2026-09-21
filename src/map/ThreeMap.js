@@ -7,7 +7,8 @@ import { createRipple } from '../effects/ripple.js'
 import { createFlyLine } from '../effects/flyLine.js'
 
 const MAP_W = 1024
-const DEPTH = 1200
+// 拉伸高度取地图宽度的 ~7%，避免区域变成"通天柱"
+const DEPTH = 70
 
 export class ThreeMap {
   constructor(container, { onSelect, onBreadcrumb } = {}) {
@@ -41,7 +42,7 @@ export class ThreeMap {
     this.scene.fog = new THREE.FogExp2(0x05080f, 0.00009)
 
     this.camera = new THREE.PerspectiveCamera(45, w / h, 1, 30000)
-    this.camera.position.set(0, 1300, 1500)
+    this.camera.position.set(0, 1050, 1400)
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
     this.renderer.setSize(w, h)
@@ -124,7 +125,7 @@ export class ThreeMap {
   }
 
   _resetCamera() {
-    this._focus(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1300, 1500))
+    this._focus(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 1050, 1400))
   }
 
   _focus(target, pos) {
@@ -154,7 +155,7 @@ export class ThreeMap {
 
     const cw = featureGroup.userData.centerWorld
     if (cw) {
-      this._focus(cw.clone(), cw.clone().add(new THREE.Vector3(0, 800, 1050)))
+      this._focus(cw.clone(), cw.clone().add(new THREE.Vector3(0, 620, 880)))
       this._clearEffects()
       this.ripples.push(createRipple(cw.clone()))
       this.flyLines.push(createFlyLine(cw.clone(), new THREE.Vector3(0, DEPTH * 0.6, 0)))
@@ -167,7 +168,7 @@ export class ThreeMap {
       const cap = fg.userData.capMat
       const base = fg.userData.baseColor
       if (fg === sel) {
-        cap.emissive.copy(base).multiplyScalar(0.9)
+        cap.emissive.copy(base).multiplyScalar(0.55)
         cap.opacity = 1
       } else {
         cap.emissive.copy(base).multiplyScalar(0.05)
