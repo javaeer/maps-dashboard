@@ -53,13 +53,16 @@ function regionToPanel(feature) {
 }
 
 function townToPanel(town) {
+  const m = town.meta || {}
   return {
     name: town.name,
-    level: '镇级',
+    level: town.level === '乡镇' ? '乡镇级' : '镇级',
     meta: {
       population: town.population ?? null,
       area: town.area ?? null,
       images: town.images || [],
+      // 透传行政区划信息（省 / 市 / 县 / 乡镇），面板渲染为「行政区划」区
+      attrs: m.attrs || [],
       custom: {
         gdp: town.gdp || '',
         intro: town.intro || '',

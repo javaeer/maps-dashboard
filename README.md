@@ -80,13 +80,20 @@ node scripts/fetch-geo.mjs --force   # 强制覆盖已存在文件
 
 **边界数据源**：[rooma1989/china_geo_data](https://github.com/rooma1989/china_geo_data) —— 全国各乡镇的 GeoJSON 多边形，按 `省 / 市 / geo_县.json` 组织。**已校验其坐标系与 DataV 县底图完全一致**（bbox 中心差仅 ~0.002°，无需坐标转换），乡镇边界精确贴合在县境内。
 
-**加载链路（三级缓存）**：
+**数据落到本地，不依赖浏览器缓存**：乡镇边界直接下载进 `public/geo/towns/<区县 6 位 adcode>_geo.json`，随仓库 / 构建产物分发，**完全离线可用**；仅当本地缺失时才回退到「IndexedDB → 在线 jsDelivr 拉取」两级兜底（路径由内置索引 `public/geo/town_geo_index.json`，覆盖全国 2,840 个区县，按 `省/市/geo_县.json` 拼出）。
 
-1. 本地静态 `public/geo/towns/<区县 6 位 adcode>_geo.json`（会宁县 `620422_geo.json` 已默认内置，离线可用）
-2. 浏览器 IndexedDB（首次在线拉取后自动缓存）
-3. 在线兜底：jsDelivr 镜像 `rooma1989/china_geo_data` —— 路径由 `public/geo/town_geo_index.json`（本仓库内置，覆盖全国 2,840 个区县）按 `省/市/geo_县.json` 拼出
+批量下载脚本（`scripts/fetch-town-geo.mjs`，断点续传 + 并发 8 + DP 简化 + 失败重试）：
 
-> 单县边界原始精度很高（约 1~2MB），仓库内置的 `620422_geo.json` 已用 Douglas-Peucker（~90m 容差）简化到 ~8KB，常规区县在线首次拉取后也会被 IndexedDB 缓存，后续离线可用。
+```bash
+node scripts/fetch-town-geo.mjs          # 全国（约 2,840 个县）
+node scripts/fetch-town-geo.mjs 62       # 仅甘肃省
+node scripts/fetch-town-geo.mjs 6204     # 仅白银市
+node scripts/fetch-town-geo.mjs 620422   # 仅会宁县
+CONCURRENCY=16 TOL=0.002 node scripts/fetch-town-geo.mjs   # 并发/简化容差可调
+```
+
+> 单县边界原始精度很高（约 1~2MB），下载时用 Douglas-Peucker（默认容差 0.0009 ≈ 90m）简化到几十 KB。
+> ⚠️ 简化必须**先拆掉 GeoJSON 闭合环的重复末点再简化、最后补回**——否则首尾点重合会让首尾连线长度为 0，DP 把所有点距离算成 0，环被退化成 2 个点，产生「要素存在但零面积、完全不可见」的网格（本项目早期踩过这个坑，已在 `simplifyRing` 修复并在 `buildShapes` 加了外环点数防御）。
 
 **点位数据（兜底）**：若某区县暂无边界数据，则回退到 [modood/Administrative-divisions-of-China](https://github.com/modood/Administrative-divisions-of-China) 的 `streets.json` 生成的近似点位（`public/geo/towns/<区县 adcode>.json`，共 2,822 个区县、约 40,467 个点位，坐标为「区县质心 + 微抖动」的近似位置）。
 

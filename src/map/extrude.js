@@ -36,6 +36,9 @@ function buildShapes(feature, projection, W, H) {
   const out = []
   for (const poly of polys) {
     const [outer, ...holes] = poly
+    // 防御：外环点数不足（数据源被过度简化 / 退化）时无法三角化，
+    // 会产生"存在但零面积、完全不可见"的网格，直接跳过
+    if (!outer || outer.length < 4) continue
     const shape = new THREE.Shape()
     const border = [] // 外环投影点，供顶面描边
     outer.forEach(([lon, lat], i) => {
@@ -47,6 +50,8 @@ function buildShapes(feature, projection, W, H) {
       else shape.lineTo(x, y)
       border.push([x, y])
     })
+    // 投影后有效点不足 3 个同样无法成面
+    if (border.length < 3) continue
     shape.closePath()
     for (const hole of holes) {
       const hp = new THREE.Path()

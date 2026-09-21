@@ -169,36 +169,48 @@ export class ThreeMap {
     const g = new THREE.Group()
     let any = false
 
-    const townGeo = await loadTownGeo(adcode)
+    let townGeo = null
+    try {
+      townGeo = await loadTownGeo(adcode)
+    } catch (e) {
+      console.error('[maps-dashboard] 乡镇边界加载失败', adcode, e)
+    }
     if (townGeo && townGeo.features && townGeo.features.length && this.projection) {
       // 真实乡镇边界子图层
-      const built = createTownMap(townGeo, this.projection, MAP_W, DEPTH, TOWN_DEPTH)
-      this.townSideMaterials = built.sideMaterials
-      this.townFeatureGroups = built.featureGroups
-      g.add(built.group)
-      for (const fg of built.featureGroups) {
-        const props = fg.userData.feature.properties || {}
-        const tname = props.name || props.乡 || props.镇 || props.town || ''
-        const town = {
-          name: tname,
-          level: '乡镇',
-          meta: {
-            attrs: [
-              ['省', props.province],
-              ['市', props.city],
-              ['县', props.county],
-              ['乡镇', tname]
-            ].filter((x) => x[1])
+      try {
+        const built = createTownMap(townGeo, this.projection, MAP_W, DEPTH, TOWN_DEPTH)
+        this.townSideMaterials = built.sideMaterials
+        this.townFeatureGroups = built.featureGroups
+        if (built.featureGroups.length) g.add(built.group)
+        for (const fg of built.featureGroups) {
+          const props = fg.userData.feature.properties || {}
+          const tname = props.name || props.乡 || props.镇 || props.town || ''
+          const town = {
+            name: tname,
+            level: '乡镇',
+            meta: {
+              attrs: [
+                ['省', props.province],
+                ['市', props.city],
+                ['县', props.county],
+                ['乡镇', tname]
+              ].filter((x) => x[1])
+            }
           }
+          fg.userData.town = town
+          const label = createTownLabel(tname, fg.userData.centerWorld)
+          label.visible = false
+          fg.userData.label = label
+          if (fg.userData.centerWorld) g.add(label)
+          any = true
         }
-        fg.userData.town = town
-        const label = createTownLabel(tname, fg.userData.centerWorld)
-        label.visible = false
-        fg.userData.label = label
-        if (fg.userData.centerWorld) g.add(label)
-        any = true
+      } catch (e) {
+        // 乡镇图层构建异常时必须报错，不能静默变成"什么都没渲染"
+        console.error('[maps-dashboard] 乡镇图层构建失败', adcode, e)
+        this.onTownEmpty(`${name} 乡镇图层构建失败：${e && e.message}`)
       }
-    } else {
+    }
+    if (!any) {
       // 回退：合成点位标记
       const towns = await loadTowns(adcode)
       if (towns && towns.length) {
@@ -299,9 +311,12 @@ export class ThreeMap {
     if (this.townGroup) {
       const hits = this.raycaster.intersectObjects(this.townGroup.children, true)
       for (const h of hits) {
+        // 必须上溯到「要素组 / 标记组」（带 userData.town）为止：
+        // 射线命中的是 mesh，而 mesh 只有 userData.feature，label / capMat /
+        // town 都挂在父级要素组上，对 mesh 取这些字段会抛异常导致点击无响应
         let o = h.object
-        while (o && !o.userData.town && !o.userData.feature) o = o.parent
-        if (o && (o.userData.town || o.userData.feature)) {
+        while (o && !o.userData.town) o = o.parent
+        if (o && o.userData.town) {
           this._selectTown(o)
           return
         }
@@ -320,17 +335,22 @@ export class ThreeMap {
   }
 
   _selectTown(fg) {
+    if (!fg || !fg.userData || !fg.userData.town) return
     // 换选时：隐藏上一个选中乡镇的标签、并恢复其顶面亮度
-    if (this.selectedTown && this.selectedTown !== fg) {
-      this.selectedTown.userData.label.visible = false
-      this.selectedTown.userData.capMat.emissive
-        .copy(this.selectedTown.userData.baseColor)
-        .multiplyScalar(0.16)
+    const prev = this.selectedTown
+    if (prev && prev !== fg) {
+      if (prev.userData.label) prev.userData.label.visible = false
+      // 回退点位标记没有顶面材质，仅在真实边界要素上恢复
+      if (prev.userData.capMat && prev.userData.baseColor) {
+        prev.userData.capMat.emissive.copy(prev.userData.baseColor).multiplyScalar(0.16)
+      }
     }
     this.selectedTown = fg
-    fg.userData.label.visible = true
-    // 选中乡镇：顶面提亮自发光
-    fg.userData.capMat.emissive.copy(fg.userData.baseColor).multiplyScalar(0.6)
+    if (fg.userData.label) fg.userData.label.visible = true
+    // 选中乡镇：顶面提亮自发光（同样仅真实边界要素具备）
+    if (fg.userData.capMat && fg.userData.baseColor) {
+      fg.userData.capMat.emissive.copy(fg.userData.baseColor).multiplyScalar(0.6)
+    }
     const town = fg.userData.town
     const world = (fg.userData.centerWorld || new THREE.Vector3()).clone()
     this._focus(
@@ -355,9 +375,10 @@ export class ThreeMap {
     const hits = this.raycaster.intersectObjects(this.townGroup.children, true)
     let marker = null
     for (const h of hits) {
+      // 同样必须上溯到要素组（带 userData.town）
       let o = h.object
-      while (o && !o.userData.town && !o.userData.feature) o = o.parent
-      if (o && (o.userData.town || o.userData.feature)) {
+      while (o && !o.userData.town) o = o.parent
+      if (o && o.userData.town) {
         marker = o
         break
       }
@@ -368,11 +389,11 @@ export class ThreeMap {
   _setHovered(marker) {
     if (this.hoveredTown === marker) return
     if (this.hoveredTown && this.hoveredTown !== this.selectedTown) {
-      this.hoveredTown.userData.label.visible = false
+      if (this.hoveredTown.userData.label) this.hoveredTown.userData.label.visible = false
     }
     this.hoveredTown = marker
     if (marker) {
-      marker.userData.label.visible = true
+      if (marker.userData.label) marker.userData.label.visible = true
       this.renderer.domElement.style.cursor = 'pointer'
     } else {
       this.renderer.domElement.style.cursor = ''

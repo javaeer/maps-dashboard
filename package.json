@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "fetch-geo": "node scripts/fetch-geo.mjs",
+    "fetch-town-geo": "node scripts/fetch-town-geo.mjs",
     "build-towns": "node scripts/build-towns.mjs"
   },
   "keywords": [
