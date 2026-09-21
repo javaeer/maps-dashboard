@@ -1,0 +1,31 @@
+{
+  "name": "maps-dashboard",
+  "version": "1.0.0",
+  "description": "交互式中国 3D 地图可视化大屏：点击省/市/区展示地名、人口、土地面积、图片集合等自定义信息。Vue 3 + Three.js + UnrealBloom。",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "vue",
+    "threejs",
+    "3d-map",
+    "dataviz",
+    "dashboard",
+    "china-map",
+    "geojson"
+  ],
+  "author": "javaeer",
+  "license": "MIT",
+  "dependencies": {
+    "d3-geo": "^3.1.1",
+    "three": "^0.160.1",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.4",
+    "vite": "^5.2.11"
+  }
+}
