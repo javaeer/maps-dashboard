@@ -164,15 +164,16 @@ export class ThreeMap {
   }
 
   _highlight(sel) {
+    // 不透明顶盖：未选中 = 调暗颜色（而非半透明），选中 = 提亮自发光
     this.featureGroups.forEach((fg) => {
       const cap = fg.userData.capMat
       const base = fg.userData.baseColor
       if (fg === sel) {
+        cap.color.copy(base)
         cap.emissive.copy(base).multiplyScalar(0.55)
-        cap.opacity = 1
       } else {
-        cap.emissive.copy(base).multiplyScalar(0.05)
-        cap.opacity = 0.3
+        cap.color.copy(base).multiplyScalar(0.35)
+        cap.emissive.copy(base).multiplyScalar(0.03)
       }
     })
   }
@@ -180,8 +181,8 @@ export class ThreeMap {
   _clearHighlight() {
     this.featureGroups.forEach((fg) => {
       const cap = fg.userData.capMat
+      cap.color.copy(fg.userData.baseColor)
       cap.emissive.copy(fg.userData.baseColor).multiplyScalar(0.18)
-      cap.opacity = 1
     })
     this.selected = null
   }

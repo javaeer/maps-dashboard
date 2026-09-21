@@ -17,9 +17,9 @@ const sideFragmentShader = /* glsl */ `
   void main() {
     // vUv.y 沿拉伸高度（0=底, 1=顶），让亮带循环上下扫描
     float t = fract(vUv.y - uTime * 0.18);
-    float band = exp(-pow((t - 0.5) * 7.0, 2.0));
+    float band = exp(-pow((t - 0.5) * 9.0, 2.0));
     vec3 col = mix(uColor, uGlow, band);
-    float intensity = 0.5 + band * 0.85;
+    float intensity = 0.22 + band * 0.45;
     gl_FragColor = vec4(col * intensity, 1.0);
   }
 `
@@ -133,16 +133,15 @@ export function createExtrudedMap(geojson, opts = {}) {
       color: baseColor,
       emissive: baseColor.clone().multiplyScalar(0.18),
       metalness: 0.2,
-      roughness: 0.55,
-      transparent: true,
-      opacity: 1
+      roughness: 0.55
+      // 不使用透明：半透明顶盖会让内部所有侧面亮墙透出，形成噪点
     })
 
     const sideMat = new THREE.ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
         uColor: { value: baseColor.clone() },
-        uGlow: { value: new THREE.Color(0x9ffcff) }
+        uGlow: { value: new THREE.Color(0x6fd8ff) }
       },
       vertexShader: sideVertexShader,
       fragmentShader: sideFragmentShader
