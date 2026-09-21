@@ -33,6 +33,16 @@
         </div>
       </div>
 
+      <div class="section" v-if="attrRows.length">
+        <div class="label">行政区划</div>
+        <div class="attrs">
+          <div class="attr" v-for="(a, i) in attrRows" :key="i">
+            <span class="ak">{{ a[0] }}</span>
+            <span class="av">{{ a[1] }}</span>
+          </div>
+        </div>
+      </div>
+
       <div class="section">
         <div class="label">图片集合</div>
         <ImageGallery :images="images" />
@@ -46,22 +56,20 @@ import { computed } from 'vue'
 import ImageGallery from './ImageGallery.vue'
 import { formatPopulation, formatArea } from '../utils/format.js'
 
+// data 为归一化结构：{ name, level, meta: { population, area, images, custom: { gdp, intro, tags } } }
 const props = defineProps({
   data: { type: Object, default: null }
 })
 defineEmits(['close'])
 
-const name = computed(() => (props.data ? props.data.feature.properties.name : ''))
+const name = computed(() => (props.data ? props.data.name : ''))
+const levelLabel = computed(() => (props.data ? props.data.level || '行政区' : ''))
 const meta = computed(() => (props.data ? props.data.meta : null))
-const levelMap = { country: '国家级', province: '省级', city: '市级', district: '区县级' }
-const levelLabel = computed(() => {
-  const lvl = props.data && props.data.feature.properties.level
-  return (lvl && levelMap[lvl]) || '行政区'
-})
 const popText = computed(() => (meta.value ? formatPopulation(meta.value.population) : '—'))
 const areaText = computed(() => (meta.value ? formatArea(meta.value.area) : '—'))
 const images = computed(() => (meta.value ? meta.value.images || [] : []))
 const tags = computed(() => (meta.value && meta.value.custom ? meta.value.custom.tags || [] : []))
+const attrRows = computed(() => (meta.value && meta.value.attrs ? meta.value.attrs : []))
 </script>
 
 <style scoped>
@@ -161,6 +169,27 @@ const tags = computed(() => (meta.value && meta.value.custom ? meta.value.custom
   background: rgba(34, 211, 238, 0.12);
   border: 1px solid rgba(34, 211, 238, 0.3);
   color: var(--accent-2);
+}
+.attrs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.attr {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid rgba(56, 189, 248, 0.14);
+}
+.ak {
+  color: var(--text-1);
+}
+.av {
+  color: var(--text-0);
+  font-weight: 600;
 }
 
 .slide-enter-active,

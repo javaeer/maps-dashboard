@@ -11,12 +11,15 @@ const sideVertexShader = /* glsl */ `
 `
 const sideFragmentShader = /* glsl */ `
   uniform float uTime;
+  uniform float uDepth;
   uniform vec3 uColor;
   uniform vec3 uGlow;
   varying vec2 vUv;
   void main() {
-    // vUv.y 沿拉伸高度（0=底, 1=顶），让亮带循环上下扫描
-    float t = fract(vUv.y - uTime * 0.18);
+    // 注意：ExtrudeGeometry 侧面 UV 的 v 分量是 1 - z（z 跨 0..depth 的实际数值），
+    // 必须先按 uDepth 归一化到 0~1，否则 fract 会把扫光带切成 depth 条细纹（摩尔纹）
+    float h = vUv.y / uDepth;
+    float t = fract(h - uTime * 0.18);
     float band = exp(-pow((t - 0.5) * 9.0, 2.0));
     vec3 col = mix(uColor, uGlow, band);
     float intensity = 0.22 + band * 0.45;
@@ -25,15 +28,16 @@ const sideFragmentShader = /* glsl */ `
 `
 
 // 把一个 feature 的几何（Polygon / MultiPolygon）转成 THREE.Shape 列表
-// 投影采用 d3 geoMercator.fitSize，并把墨卡托 y（向下）翻转，使北在上方
+// 同时返回每个外环的投影平面坐标（用于绘制顶面发光描边）
 function buildShapes(feature, projection, W, H) {
   const geom = feature.geometry
   if (!geom) return []
   const polys = geom.type === 'Polygon' ? [geom.coordinates] : geom.coordinates
-  const shapes = []
+  const out = []
   for (const poly of polys) {
     const [outer, ...holes] = poly
     const shape = new THREE.Shape()
+    const border = [] // 外环投影点，供顶面描边
     outer.forEach(([lon, lat], i) => {
       const p = projection([lon, lat])
       if (!p) return
@@ -41,6 +45,7 @@ function buildShapes(feature, projection, W, H) {
       const y = H / 2 - p[1] // 翻转 y，保证北在上
       if (i === 0) shape.moveTo(x, y)
       else shape.lineTo(x, y)
+      border.push([x, y])
     })
     shape.closePath()
     for (const hole of holes) {
@@ -56,9 +61,9 @@ function buildShapes(feature, projection, W, H) {
       hp.closePath()
       shape.holes.push(hp)
     }
-    shapes.push(shape)
+    out.push({ shape, border })
   }
-  return shapes
+  return out
 }
 
 // 手动计算 GeoJSON 的平面经纬度包围盒
@@ -86,7 +91,7 @@ function computeLonLatBBox(geojson) {
 }
 
 // 墨卡托投影手动适配：将 bbox 缩放居中到 [0,W]×[0,H]
-function createFittedProjection(geojson, W, H) {
+export function createFittedProjection(geojson, W, H) {
   const raw = geoMercator().scale(1).translate([0, 0])
   const clampLat = (lat) => Math.max(-85, Math.min(85, lat))
   const [[minLon, minLat], [maxLon, maxLat]] = computeLonLatBBox(geojson)
@@ -140,6 +145,7 @@ export function createExtrudedMap(geojson, opts = {}) {
     const sideMat = new THREE.ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
+        uDepth: { value: depth },
         uColor: { value: baseColor.clone() },
         uGlow: { value: new THREE.Color(0x6fd8ff) }
       },
@@ -148,8 +154,17 @@ export function createExtrudedMap(geojson, opts = {}) {
     })
     sideMaterials.push(sideMat)
 
+    // 顶面发光描边（共享材质，加色混合形成锐利边线）
+    const borderMat = new THREE.LineBasicMaterial({
+      color: 0x9ffcff,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    })
+
     const featureGroup = new THREE.Group()
-    shapes.forEach((shape) => {
+    shapes.forEach(({ shape, border }) => {
       const geo = new THREE.ExtrudeGeometry(shape, {
         depth,
         bevelEnabled: false,
@@ -159,6 +174,15 @@ export function createExtrudedMap(geojson, opts = {}) {
       const mesh = new THREE.Mesh(geo, [capMat, sideMat])
       mesh.userData.feature = feature
       featureGroup.add(mesh)
+
+      // 顶面轮廓 LineLoop（局部 z = depth 即世界 y = depth = 顶面）
+      if (border.length > 1) {
+        const pts = border.map(([x, y]) => new THREE.Vector3(x, y, depth + 0.5))
+        const bg = new THREE.BufferGeometry().setFromPoints(pts)
+        const line = new THREE.LineLoop(bg, borderMat)
+        line.renderOrder = 2
+        featureGroup.add(line)
+      }
     })
 
     // 记录区域中心的世界坐标（用于点击聚焦 / 飞线 / 脉冲）
@@ -176,9 +200,114 @@ export function createExtrudedMap(geojson, opts = {}) {
     featureGroup.userData.capMat = capMat
     featureGroup.userData.sideMat = sideMat
     featureGroup.userData.baseColor = baseColor
+    featureGroup.userData.borderMat = borderMat
     group.add(featureGroup)
     featureGroups.push(featureGroup)
   })
 
-  return { group, sideMaterials, featureGroups }
+  return { group, sideMaterials, featureGroups, projection }
+}
+
+// 乡镇边界子图层：复用「县」已有的投影，把每个乡镇多边形薄拉伸成浮雕，
+// 整体贴在县顶面（group.position.y = DEPTH）之上，形成可点击的乡镇拼图
+export function createTownMap(geojson, projection, W, DEPTH, townDepth) {
+  const H = W
+  const group = new THREE.Group()
+  group.rotation.x = -Math.PI / 2
+  group.position.y = DEPTH // 坐在县顶面
+
+  const sideMaterials = []
+  const featureGroups = []
+  const features = geojson.features || []
+
+  const featureCentroid = (feature) => {
+    const c = feature.properties.center || feature.properties.centroid
+    if (c) return c
+    // 退而求其次：用外环顶点均值近似
+    const g = feature.geometry
+    const ring = (g.type === 'Polygon' ? g.coordinates[0] : g.coordinates[0][0])
+    if (!ring || !ring.length) return null
+    let sx = 0, sy = 0
+    for (const [lon, lat] of ring) {
+      sx += lon
+      sy += lat
+    }
+    return [sx / ring.length, sy / ring.length]
+  }
+
+  features.forEach((feature, idx) => {
+    const shapes = buildShapes(feature, projection, W, H)
+    if (!shapes.length) return
+
+    // 乡镇用青绿色系，与县级科技蓝区分开
+    const hue = 150 + (idx * 17) % 55
+    const baseColor = new THREE.Color().setHSL(hue / 360, 0.6, 0.55)
+
+    const capMat = new THREE.MeshStandardMaterial({
+      color: baseColor,
+      emissive: baseColor.clone().multiplyScalar(0.16),
+      metalness: 0.2,
+      roughness: 0.6
+    })
+
+    const sideMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uDepth: { value: townDepth },
+        uColor: { value: baseColor.clone() },
+        uGlow: { value: new THREE.Color(0x7cffb0) }
+      },
+      vertexShader: sideVertexShader,
+      fragmentShader: sideFragmentShader
+    })
+    sideMaterials.push(sideMat)
+
+    const borderMat = new THREE.LineBasicMaterial({
+      color: 0xcfffe9,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    })
+
+    const featureGroup = new THREE.Group()
+    shapes.forEach(({ shape, border }) => {
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth: townDepth,
+        bevelEnabled: false,
+        steps: 1
+      })
+      const mesh = new THREE.Mesh(geo, [capMat, sideMat])
+      mesh.userData.feature = feature
+      featureGroup.add(mesh)
+
+      if (border.length > 1) {
+        const pts = border.map(([x, y]) => new THREE.Vector3(x, y, townDepth + 0.5))
+        const bg = new THREE.BufferGeometry().setFromPoints(pts)
+        featureGroup.add(new THREE.LineLoop(bg, borderMat))
+      }
+    })
+
+    const c = featureCentroid(feature)
+    let centerWorld = null
+    if (c) {
+      const p = projection(c)
+      if (p) {
+        const lx = p[0] - W / 2
+        const ly = H / 2 - p[1]
+        centerWorld = new THREE.Vector3(lx, DEPTH + townDepth / 2, -ly)
+      }
+    }
+
+    featureGroup.userData.feature = feature
+    featureGroup.userData.capMat = capMat
+    featureGroup.userData.sideMat = sideMat
+    featureGroup.userData.baseColor = baseColor
+    featureGroup.userData.borderMat = borderMat
+    featureGroup.userData.centerWorld = centerWorld
+    group.add(featureGroup)
+    featureGroups.push(featureGroup)
+  })
+
+  return { group, sideMaterials, featureGroups, projection }
 }

@@ -7,7 +7,11 @@
       <Breadcrumb :items="breadcrumb" @select="onCrumb" />
     </header>
 
-    <div class="hint">单击区域查看信息 · 双击下钻 · 右键返回上级</div>
+    <div class="hint">单击区域查看信息 · 双击下钻 · 右键返回 · 双击区县查看乡镇</div>
+
+    <transition name="fade">
+      <div v-if="townHint" class="toast">{{ townHint }}</div>
+    </transition>
 
     <InfoPanel :data="selected" @close="closePanel" />
   </div>
@@ -23,27 +27,74 @@ import Breadcrumb from './components/Breadcrumb.vue'
 const container = ref(null)
 const selected = ref(null)
 const breadcrumb = ref(['中国'])
+const townHint = ref('')
 let map = null
+let hintTimer = null
+
+const LEVEL_LABEL = {
+  country: '国家级',
+  province: '省级',
+  city: '市级',
+  district: '区县级'
+}
+
+function emptyMeta() {
+  return { population: null, area: null, images: [], custom: {} }
+}
+
+function regionToPanel(feature) {
+  const adcode = String(feature.properties.adcode)
+  const meta = getRegionMeta(adcode) || emptyMeta()
+  return {
+    name: feature.properties.name,
+    level: LEVEL_LABEL[feature.properties.level] || '行政区',
+    meta
+  }
+}
+
+function townToPanel(town) {
+  return {
+    name: town.name,
+    level: '镇级',
+    meta: {
+      population: town.population ?? null,
+      area: town.area ?? null,
+      images: town.images || [],
+      custom: {
+        gdp: town.gdp || '',
+        intro: town.intro || '',
+        tags: town.tags || []
+      }
+    }
+  }
+}
+
+function showTownHint(name) {
+  townHint.value = `「${name}」暂无镇级点位数据，可在 public/geo/towns/ 补录对应 adcode 的 JSON`
+  clearTimeout(hintTimer)
+  hintTimer = setTimeout(() => (townHint.value = ''), 2800)
+}
 
 onMounted(async () => {
   map = new ThreeMap(container.value, {
     onSelect: (feature) => {
-      if (!feature) {
-        selected.value = null
-        return
-      }
-      const adcode = String(feature.properties.adcode)
-      const meta = getRegionMeta(adcode)
-      selected.value = { feature, meta }
+      selected.value = feature ? regionToPanel(feature) : null
+    },
+    onSelectTown: (town) => {
+      selected.value = town ? townToPanel(town) : null
     },
     onBreadcrumb: (names) => {
       breadcrumb.value = names
+    },
+    onTownEmpty: (name) => {
+      showTownHint(name)
     }
   })
   await map.load('100000')
 })
 
 onBeforeUnmount(() => {
+  clearTimeout(hintTimer)
   if (map) map.dispose()
 })
 
@@ -100,5 +151,26 @@ function closePanel() {
   background: rgba(10, 20, 38, 0.6);
   border: 1px solid rgba(56, 189, 248, 0.2);
   z-index: 10;
+}
+.toast {
+  position: absolute;
+  bottom: 70px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  color: #ffe2a8;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: rgba(40, 28, 10, 0.7);
+  border: 1px solid rgba(255, 200, 120, 0.35);
+  z-index: 12;
+}
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
 </style>

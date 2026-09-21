@@ -1,27 +1,40 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { createComposer } from '../effects/bloom.js'
-import { createExtrudedMap } from './extrude.js'
-import { loadGeoJSON } from './geoLoader.js'
+import { createExtrudedMap, createTownMap } from './extrude.js'
+import { loadGeoJSON, loadTowns, loadCountyGeo, loadTownGeo } from './geoLoader.js'
 import { createRipple } from '../effects/ripple.js'
 import { createFlyLine } from '../effects/flyLine.js'
+import { createTownMarker, createTownLabel, geoToWorld } from '../effects/town.js'
 
 const MAP_W = 1024
 // 拉伸高度取地图宽度的 ~7%，避免区域变成"通天柱"
 const DEPTH = 70
+// 乡镇子图层薄浮雕高度（坐在县顶面之上）
+const TOWN_DEPTH = 12
 
 export class ThreeMap {
-  constructor(container, { onSelect, onBreadcrumb } = {}) {
+  constructor(container, { onSelect, onBreadcrumb, onSelectTown, onTownEmpty } = {}) {
     this.container = container
     this.onSelect = onSelect || (() => {})
     this.onBreadcrumb = onBreadcrumb || (() => {})
+    this.onSelectTown = onSelectTown || (() => {})
+    this.onTownEmpty = onTownEmpty || (() => {})
 
     this.adcodeStack = ['100000']
     this.nameMap = { 100000: '中国' }
     this.mapGroup = null
     this.featureGroups = []
     this.sideMaterials = []
+    this.projection = null
     this.selected = null
+    this.selectedTown = null
+    this.hoveredTown = null
+    this.townGroup = null
+    this.townAdcode = null
+    this.townSideMaterials = []
+    this.townFeatureGroups = []
+    this.mode = 'region' // 'region' | 'town'
     this.ripples = []
     this.flyLines = []
     this.focusTarget = null
@@ -57,6 +70,9 @@ export class ThreeMap {
     this.controls.minDistance = 200
     this.controls.maxDistance = 5000
     this.controls.maxPolarAngle = Math.PI * 0.49
+    // 空闲自动旋转（大屏 turntable 效果），选中/下钻时由动画循环关闭
+    this.controls.autoRotate = true
+    this.controls.autoRotateSpeed = 0.5
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.65))
     const dir = new THREE.DirectionalLight(0x9fd8ff, 1.1)
@@ -77,16 +93,27 @@ export class ThreeMap {
     this.pointer = new THREE.Vector2()
   }
 
+  // 渲染某个行政区的面地图；geo 为 null 表示加载失败
   async load(adcode) {
     const target = adcode || this.adcodeStack[this.adcodeStack.length - 1]
-    // 重置到顶层时清空名称缓存
     if (target === '100000') this.nameMap = { 100000: '中国' }
 
     this._clearMap()
-    this.onSelect(null) // 切换层级时关闭信息面板
+    this._clearTowns()
+    this.mode = 'region'
+    this.onSelect(null)
 
     const geo = await loadGeoJSON(target)
-    this.geo = geo
+    if (!geo) {
+      this.onTownEmpty('该层级')
+      return
+    }
+    this._renderRegion(geo, target)
+    this._resetCamera()
+    this.onBreadcrumb(this.adcodeStack.map((a) => this.nameMap[a] || a))
+  }
+
+  _renderRegion(geo, adcode) {
     geo.features.forEach((f) => {
       const p = f.properties || {}
       if (p.adcode != null) this.nameMap[p.adcode] = p.name || p.adcode
@@ -96,21 +123,149 @@ export class ThreeMap {
     this.mapGroup = built.group
     this.featureGroups = built.featureGroups
     this.sideMaterials = built.sideMaterials
+    this.projection = built.projection
     this.scene.add(this.mapGroup)
-
-    this._resetCamera()
-    this.onBreadcrumb(this.adcodeStack.map((a) => this.nameMap[a] || a))
   }
 
-  drill(feature) {
+  // 下钻：先探测是否有下级面；有则渲染面，无（叶子区县）则进入镇点位视图
+  async drill(feature) {
     const p = feature.properties || {}
-    if (p.childrenNum > 0 && p.adcode != null) {
-      this.adcodeStack.push(String(p.adcode))
-      this.load()
+    if (p.adcode == null) return
+    const adcode = String(p.adcode)
+    this.onSelect(null)
+
+    const geo = await loadGeoJSON(adcode)
+    if (geo) {
+      this.adcodeStack.push(adcode)
+      // 先清掉上一级地图与镇点位，避免下钻层级在场景里不断叠加
+      this._clearMap()
+      this._clearTowns()
+      this._renderRegion(geo, adcode)
+      this._resetCamera()
+      this.onBreadcrumb(this.adcodeStack.map((a) => this.nameMap[a] || a))
+    } else {
+      // 叶子区县：DataV 无县级 _full.json，回退加载县自身边界渲染为底图，再叠乡镇点位
+      const self = await loadCountyGeo(adcode)
+      if (self) {
+        this.adcodeStack.push(adcode)
+        this._clearMap()
+        this._clearTowns()
+        this._renderRegion(self, adcode)
+        this.onBreadcrumb(this.adcodeStack.map((a) => this.nameMap[a] || a))
+      }
+      this._enterTownView(feature, adcode)
     }
   }
 
+  // 进入乡镇视图：优先渲染「真实乡镇边界」子图层（贴在县顶面），
+  // 无边界数据时回退到合成点位标记
+  async _enterTownView(feature, adcode) {
+    const name = (feature.properties && feature.properties.name) || adcode
+    this._clearTowns()
+    this.mode = 'town'
+    this.selected = null
+    this._clearHighlight()
+
+    const g = new THREE.Group()
+    let any = false
+
+    const townGeo = await loadTownGeo(adcode)
+    if (townGeo && townGeo.features && townGeo.features.length && this.projection) {
+      // 真实乡镇边界子图层
+      const built = createTownMap(townGeo, this.projection, MAP_W, DEPTH, TOWN_DEPTH)
+      this.townSideMaterials = built.sideMaterials
+      this.townFeatureGroups = built.featureGroups
+      g.add(built.group)
+      for (const fg of built.featureGroups) {
+        const props = fg.userData.feature.properties || {}
+        const tname = props.name || props.乡 || props.镇 || props.town || ''
+        const town = {
+          name: tname,
+          level: '乡镇',
+          meta: {
+            attrs: [
+              ['省', props.province],
+              ['市', props.city],
+              ['县', props.county],
+              ['乡镇', tname]
+            ].filter((x) => x[1])
+          }
+        }
+        fg.userData.town = town
+        const label = createTownLabel(tname, fg.userData.centerWorld)
+        label.visible = false
+        fg.userData.label = label
+        if (fg.userData.centerWorld) g.add(label)
+        any = true
+      }
+    } else {
+      // 回退：合成点位标记
+      const towns = await loadTowns(adcode)
+      if (towns && towns.length) {
+        for (const t of towns) {
+          const marker = createTownMarker(t, this.projection, MAP_W, DEPTH)
+          if (marker) {
+            g.add(marker)
+            any = true
+          }
+        }
+      }
+    }
+
+    if (!any) {
+      this.onTownEmpty(name)
+      return
+    }
+    this.townGroup = g
+    this.townAdcode = adcode
+    this.scene.add(g)
+
+    // 聚焦到该区县中心
+    const c = feature.properties && (feature.properties.center || feature.properties.centroid)
+    if (c && this.projection) {
+      const cw = geoToWorld(this.projection, MAP_W, DEPTH, c[0], c[1])
+      if (cw) this._focus(cw.clone(), cw.clone().add(new THREE.Vector3(0, 520, 760)))
+    }
+    // 县 adcode 已入栈时（由 drill 渲染县级底图）不再追加名称，避免面包屑重复
+    const names = this.adcodeStack.map((a) => this.nameMap[a] || a)
+    if (this.adcodeStack[this.adcodeStack.length - 1] !== String(adcode)) names.push(name)
+    this.onBreadcrumb(names)
+  }
+
+  _exitTownView() {
+    this._clearTowns()
+    this.mode = 'region'
+    this.selectedTown = null
+    this.onSelectTown(null)
+    this.onBreadcrumb(this.adcodeStack.map((a) => this.nameMap[a] || a))
+  }
+
+  _clearTowns() {
+    this.hoveredTown = null
+    if (this.townGroup) {
+      this.townGroup.traverse((o) => {
+        if (o.geometry) o.geometry.dispose()
+        if (o.material) {
+          const mats = Array.isArray(o.material) ? o.material : [o.material]
+          mats.forEach((m) => {
+            if (m.map && m.map.dispose) m.map.dispose()
+            if (m.dispose) m.dispose()
+          })
+        }
+      })
+      this.scene.remove(this.townGroup)
+    }
+    this.townGroup = null
+    this.townAdcode = null
+    this.townSideMaterials = []
+    this.townFeatureGroups = []
+  }
+
   back() {
+    if (this.mode === 'town') {
+      this._exitTownView()
+      return
+    }
     if (this.adcodeStack.length > 1) {
       this.adcodeStack.pop()
       this.load()
@@ -134,17 +289,93 @@ export class ThreeMap {
   }
 
   _pick(e) {
-    if (!this.mapGroup) return
+    if (!this.mapGroup && !this.townGroup) return
     const rect = this.renderer.domElement.getBoundingClientRect()
     this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
     this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
     this.raycaster.setFromCamera(this.pointer, this.camera)
+
+    // 镇模式：只拾取乡镇要素（真实边界多边形或回退点位）
+    if (this.townGroup) {
+      const hits = this.raycaster.intersectObjects(this.townGroup.children, true)
+      for (const h of hits) {
+        let o = h.object
+        while (o && !o.userData.town && !o.userData.feature) o = o.parent
+        if (o && (o.userData.town || o.userData.feature)) {
+          this._selectTown(o)
+          return
+        }
+      }
+      return
+    }
+
+    // 区域模式
     const hits = this.raycaster.intersectObjects(this.mapGroup.children, true)
     for (const h of hits) {
       if (h.object.userData && h.object.userData.feature) {
         this._select(h.object.parent, h.object.userData.feature)
         break
       }
+    }
+  }
+
+  _selectTown(fg) {
+    // 换选时：隐藏上一个选中乡镇的标签、并恢复其顶面亮度
+    if (this.selectedTown && this.selectedTown !== fg) {
+      this.selectedTown.userData.label.visible = false
+      this.selectedTown.userData.capMat.emissive
+        .copy(this.selectedTown.userData.baseColor)
+        .multiplyScalar(0.16)
+    }
+    this.selectedTown = fg
+    fg.userData.label.visible = true
+    // 选中乡镇：顶面提亮自发光
+    fg.userData.capMat.emissive.copy(fg.userData.baseColor).multiplyScalar(0.6)
+    const town = fg.userData.town
+    const world = (fg.userData.centerWorld || new THREE.Vector3()).clone()
+    this._focus(
+      world.clone().add(new THREE.Vector3(0, 10, 0)),
+      world.clone().add(new THREE.Vector3(0, 360, 560))
+    )
+    this._clearEffects()
+    this.ripples.push(createRipple(world.clone()))
+    this.onSelectTown(town)
+  }
+
+  // 乡镇悬停：显示名称标签 + 手型指针（标签默认隐藏，避免几十个标签叠成白色光斑）
+  _hover(e) {
+    if (!this.townGroup) {
+      if (this.hoveredTown) this._setHovered(null)
+      return
+    }
+    const rect = this.renderer.domElement.getBoundingClientRect()
+    this.pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1
+    this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
+    this.raycaster.setFromCamera(this.pointer, this.camera)
+    const hits = this.raycaster.intersectObjects(this.townGroup.children, true)
+    let marker = null
+    for (const h of hits) {
+      let o = h.object
+      while (o && !o.userData.town && !o.userData.feature) o = o.parent
+      if (o && (o.userData.town || o.userData.feature)) {
+        marker = o
+        break
+      }
+    }
+    this._setHovered(marker)
+  }
+
+  _setHovered(marker) {
+    if (this.hoveredTown === marker) return
+    if (this.hoveredTown && this.hoveredTown !== this.selectedTown) {
+      this.hoveredTown.userData.label.visible = false
+    }
+    this.hoveredTown = marker
+    if (marker) {
+      marker.userData.label.visible = true
+      this.renderer.domElement.style.cursor = 'pointer'
+    } else {
+      this.renderer.domElement.style.cursor = ''
     }
   }
 
@@ -164,16 +395,19 @@ export class ThreeMap {
   }
 
   _highlight(sel) {
-    // 不透明顶盖：未选中 = 调暗颜色（而非半透明），选中 = 提亮自发光
+    // 不透明顶盖：未选中 = 调暗颜色（而非半透明），选中 = 提亮自发光 + 描边加亮
     this.featureGroups.forEach((fg) => {
       const cap = fg.userData.capMat
       const base = fg.userData.baseColor
+      const border = fg.userData.borderMat
       if (fg === sel) {
         cap.color.copy(base)
         cap.emissive.copy(base).multiplyScalar(0.55)
+        border.opacity = 1.0
       } else {
         cap.color.copy(base).multiplyScalar(0.35)
         cap.emissive.copy(base).multiplyScalar(0.03)
+        border.opacity = 0.45
       }
     })
   }
@@ -183,6 +417,7 @@ export class ThreeMap {
       const cap = fg.userData.capMat
       cap.color.copy(fg.userData.baseColor)
       cap.emissive.copy(fg.userData.baseColor).multiplyScalar(0.18)
+      fg.userData.borderMat.opacity = 0.9
     })
     this.selected = null
   }
@@ -203,7 +438,9 @@ export class ThreeMap {
   _bindEvents() {
     const el = this.renderer.domElement
     this._onClick = (e) => this._pick(e)
+    this._onMove = (e) => this._hover(e)
     this._onDblClick = (e) => {
+      if (this.mode !== 'region') return
       this._pick(e)
       if (this.selected && this.selected.userData.feature) {
         this.drill(this.selected.userData.feature)
@@ -215,6 +452,7 @@ export class ThreeMap {
     }
     this._onResize = () => this._resize()
     el.addEventListener('click', this._onClick)
+    el.addEventListener('pointermove', this._onMove)
     el.addEventListener('dblclick', this._onDblClick)
     el.addEventListener('contextmenu', this._onContext)
     window.addEventListener('resize', this._onResize)
@@ -244,6 +482,7 @@ export class ThreeMap {
     }
     this.featureGroups = []
     this.sideMaterials = []
+    this.projection = null
     this._clearEffects()
     this.selected = null
   }
@@ -254,7 +493,12 @@ export class ThreeMap {
     this.sideMaterials.forEach((m) => {
       m.uniforms.uTime.value = el
     })
+    this.townSideMaterials.forEach((m) => {
+      m.uniforms.uTime.value = el
+    })
     this.controls.update()
+    // 选中或镜头聚焦动画期间暂停自动旋转
+    this.controls.autoRotate = !this.selected && !this.selectedTown && !this.focusTarget
 
     if (this.focusTarget) {
       this.controls.target.lerp(this.focusTarget, 0.08)
@@ -283,8 +527,10 @@ export class ThreeMap {
     window.removeEventListener('resize', this._onResize)
     const el = this.renderer.domElement
     el.removeEventListener('click', this._onClick)
+    el.removeEventListener('pointermove', this._onMove)
     el.removeEventListener('dblclick', this._onDblClick)
     el.removeEventListener('contextmenu', this._onContext)
+    this._clearTowns()
     this._clearMap()
     this.controls.dispose()
     this.renderer.dispose()
