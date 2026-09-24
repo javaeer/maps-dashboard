@@ -166,3 +166,22 @@ export async function loadTowns(countyAdcode) {
   }
   return null
 }
+
+// 加载某区县的「乡镇展示信息」（人口 / 辖区面积 / 下辖村社区 / 联系方式 …）
+// 由 scripts/fetch-town-info.mjs 从政府门户网站抓取生成，静态存放于 /geo/towns/<adcode>_info.json
+// 两级缓存：本地静态文件 → IndexedDB；未采集的区县返回 null（面板自动降级为基本信息）
+export async function loadTownInfo(countyAdcode) {
+  const key = String(countyAdcode)
+  try {
+    const r = await fetch(`${LOCAL}/towns/${key}_info.json`)
+    if (r.ok) {
+      const info = await r.json()
+      await idbSet(`towninfo:${key}`, info)
+      return info
+    }
+  } catch {
+    /* 本地无该文件 */
+  }
+  const cached = await idbGet(`towninfo:${key}`)
+  return cached || null
+}

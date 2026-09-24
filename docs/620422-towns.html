@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>会宁县 乡镇数据汇总</title>
+<style>
+  :root{--bg:#0b1220;--card:#111c31;--line:#1e3a5f;--t0:#e6f0ff;--t1:#94a9c4;--acc:#38bdf8;--acc2:#a78bfa;--ok:#4ade80}
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 20% -10%,#12233d,#0b1220);color:var(--t0);
+       font:14px/1.6 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding:32px}
+  h1{font-size:24px;margin:0 0 4px;letter-spacing:1px}
+  .sub{color:var(--t1);font-size:12px;margin-bottom:24px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .card .k{font-size:12px;color:var(--t1)}
+  .card .v{font-size:22px;font-weight:700;margin-top:4px;color:var(--acc)}
+  .card .d{font-size:11px;color:var(--t1);margin-top:2px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:20px}
+  .panel h2{font-size:15px;margin:0 0 14px;color:var(--acc);letter-spacing:1px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:8px 10px;text-align:left;border-bottom:1px solid rgba(56,189,248,.12)}
+  th{color:var(--t1);font-weight:600;font-size:12px;cursor:pointer;user-select:none;white-space:nowrap}
+  th:hover{color:var(--acc)}
+  td.num{text-align:right;font-variant-numeric:tabular-nums}
+  td.nm{font-weight:600;white-space:nowrap}
+  td.ty{color:var(--t1)}
+  td.vil{max-width:420px}
+  .c{display:inline-block;font-size:11px;padding:1px 6px;border-radius:4px;margin:1px 2px}
+  .c.v{background:rgba(74,222,128,.12);border:1px solid rgba(74,222,128,.28);color:#86efac}
+  .c.m{background:rgba(167,139,250,.12);border:1px solid rgba(167,139,250,.3);color:#c4b5fd}
+  .bars{display:grid;grid-template-columns:1fr 1fr;gap:8px 28px}
+  .bar-row{display:grid;grid-template-columns:88px 1fr 92px;align-items:center;gap:8px;font-size:12px}
+  .bar-label{color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bar-track{height:8px;background:rgba(56,189,248,.1);border-radius:99px;overflow:hidden}
+  .bar-fill{height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));border-radius:99px}
+  .bar-val{text-align:right;font-variant-numeric:tabular-nums;color:var(--t0)}
+  .note{font-size:12px;color:var(--t1);line-height:1.9}
+  .note li{margin-bottom:2px}
+  a{color:var(--acc)}
+  @media(max-width:900px){.bars{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <h1>会宁县 · 乡镇数据汇总</h1>
+  <div class="sub">数据来源：会宁县人民政府 · 会宁概况 · 会宁县人民政府 · 乡镇信息公开（村务公开 / 机关简介）　|　更新：2026-09-22　|　共 28 个乡镇</div>
+
+  <div class="cards">
+    <div class="card"><div class="k">乡镇数</div><div class="v">28</div><div class="d">县公布 28 个</div></div>
+    <div class="card"><div class="k">辖区面积合计</div><div class="v">6,496.2</div><div class="d">km² · 县公布 6,439</div></div>
+    <div class="card"><div class="k">户籍人口合计</div><div class="v">591,161</div><div class="d">人 · 县公布 560,700</div></div>
+    <div class="card"><div class="k">行政村</div><div class="v">279</div><div class="d">县公布 284</div></div>
+    <div class="card"><div class="k">社区</div><div class="v">37</div><div class="d">县公布 38</div></div>
+    <div class="card"><div class="k">耕地合计</div><div class="v">264.33</div><div class="d">万亩</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>面积 / 人口 排行</h2>
+    <div class="bars">
+      <div>
+    <div class="bar-row">
+      <div class="bar-label">头寨子镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:100.0%"></div></div>
+      <div class="bar-val">473.8 km²</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">汉家岔镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:81.8%"></div></div>
+      <div class="bar-val">387.5 km²</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">大沟镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:72.5%"></div></div>
+      <div class="bar-val">343.5 km²</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">新庄塬镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:70.1%"></div></div>
+      <div class="bar-val">332 km²</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">郭城驿镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:69.4%"></div></div>
+      <div class="bar-val">329 km²</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">甘沟驿镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:69.4%"></div></div>
+      <div class="bar-val">329 km²</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">刘家寨子镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:62.7%"></div></div>
+      <div class="bar-val">297.3 km²</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">新塬镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:60.6%"></div></div>
+      <div class="bar-val">287.3 km²</div>
+    </div></div>
+      <div>
+    <div class="bar-row">
+      <div class="bar-label">会师镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:100.0%"></div></div>
+      <div class="bar-val">136,000 人</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">郭城驿镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:37.1%"></div></div>
+      <div class="bar-val">50,462 人</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">头寨子镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:22.4%"></div></div>
+      <div class="bar-val">30,525 人</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">白草塬镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:18.6%"></div></div>
+      <div class="bar-val">25,265 人</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">河畔镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:17.7%"></div></div>
+      <div class="bar-val">24,055 人</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">甘沟驿镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:16.2%"></div></div>
+      <div class="bar-val">22,079 人</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">汉家岔镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:16.1%"></div></div>
+      <div class="bar-val">21,920 人</div>
+    </div>
+    <div class="bar-row">
+      <div class="bar-label">老君坡镇</div>
+      <div class="bar-track"><div class="bar-fill" style="width:15.5%"></div></div>
+      <div class="bar-val">21,075 人</div>
+    </div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>乡镇明细（点击表头排序）</h2>
+    <table id="t">
+      <thead><tr>
+        <th data-k="nm">乡镇</th><th data-k="ty">类型</th>
+        <th data-k="num" data-i="2">面积 km²</th>
+        <th data-k="num" data-i="3">人口（人）</th>
+        <th data-k="num" data-i="4">户数</th>
+        <th data-k="num" data-i="5">村</th>
+        <th data-k="num" data-i="6">社区</th>
+        <th data-k="num" data-i="7">耕地（万亩）</th>
+        <th data-k="num" data-i="8">距县城 km</th>
+        <th>下辖村 / 社区</th>
+      </tr></thead>
+      <tbody>
+      <tr data-area="203.6" data-pop="136000" data-vil="8" data-farm="11.5" data-dist="0">
+        <td class="nm">会师镇</td>
+        <td class="ty">镇</td>
+        <td class="num">203.6</td>
+        <td class="num">61,100</td>
+        <td class="num">21,095</td>
+        <td class="num">8</td>
+        <td class="num">12</td>
+        <td class="num">11.50</td>
+        <td class="num">0</td>
+        <td class="vil"><span class="c v">南什村</span><span class="c v">南咀村</span><span class="c v">西岩村</span><span class="c v">东河村</span><span class="c v">蒲杏村</span><span class="c v">高庄村</span><span class="c v">范湾村</span><span class="c v">稍岔村</span><span class="c m">东山根社区</span><span class="c m">广场社区</span><span class="c m">会师门社区</span><span class="c m">桃花山社区</span><span class="c m">校场社区</span><span class="c m">月牙堡社区</span><span class="c m">枝阳社区</span><span class="c m">钟鼓楼社区</span><span class="c m">汉唐街社区</span><span class="c m">文昌社区</span><span class="c m">颐园坪社区</span><span class="c m">圣地公园社区</span></td>
+      </tr>
+      <tr data-area="329" data-pop="50462" data-vil="11" data-farm="9.47" data-dist="999">
+        <td class="nm">郭城驿镇</td>
+        <td class="ty">镇</td>
+        <td class="num">329</td>
+        <td class="num">50,462</td>
+        <td class="num">7,126</td>
+        <td class="num">11</td>
+        <td class="num">5</td>
+        <td class="num">9.47</td>
+        <td class="num">—</td>
+        <td class="vil"><span class="c v">驮营村</span><span class="c v">红堡子村</span><span class="c v">郭城驿村</span><span class="c v">八百户村</span><span class="c v">大羊营村</span><span class="c v">叶滩村</span><span class="c v">新堡子村</span><span class="c v">黑虎岔村</span><span class="c v">小羊营村</span><span class="c v">扎子塬村</span><span class="c v">腰井村</span><span class="c m">古城社区</span><span class="c m">清凉社区</span><span class="c m">祥和社区</span><span class="c m">新城社区</span><span class="c m">园艺场社区</span></td>
+      </tr>
+      <tr data-area="243.4" data-pop="24055" data-vil="8" data-farm="8.6" data-dist="60">
+        <td class="nm">河畔镇</td>
+        <td class="ty">镇</td>
+        <td class="num">243.4</td>
+        <td class="num">24,055</td>
+        <td class="num">6,884</td>
+        <td class="num">8</td>
+        <td class="num">1</td>
+        <td class="num">8.60</td>
+        <td class="num">60</td>
+        <td class="vil"><span class="c v">中滩村</span><span class="c v">河畔村</span><span class="c v">冯家堡村</span><span class="c v">两迎水村</span><span class="c v">车家川村</span><span class="c v">任王家村</span><span class="c v">半岔村</span><span class="c v">李家塬村</span><span class="c m">古镇社区</span></td>
+      </tr>
+      <tr data-area="473.8" data-pop="30525" data-vil="15" data-farm="17.58" data-dist="999">
+        <td class="nm">头寨子镇</td>
+        <td class="ty">镇</td>
+        <td class="num">473.8</td>
+        <td class="num">30,525</td>
+        <td class="num">7,159</td>
+        <td class="num">15</td>
+        <td class="num">1</td>
+        <td class="num">17.58</td>
+        <td class="num">—</td>
+        <td class="vil"><span class="c v">老鸦村</span><span class="c v">塬边村</span><span class="c v">八岔村</span><span class="c v">三百户村</span><span class="c v">共丰村</span><span class="c v">小寨村</span><span class="c v">成牟村</span><span class="c v">头寨村</span><span class="c v">牛河村</span><span class="c v">马堡村</span><span class="c v">香林村</span><span class="c v">中湾村</span><span class="c v">牛门洞村</span><span class="c v">双坪村</span><span class="c v">坪岔村</span><span class="c m">祥麟苑社区</span></td>
+      </tr>
+      <tr data-area="139.9" data-pop="19215" data-vil="12" data-farm="11.2" data-dist="30">
+        <td class="nm">太平店镇</td>
+        <td class="ty">镇</td>
+        <td class="num">139.9</td>
+        <td class="num">19,215</td>
+        <td class="num">4,657</td>
+        <td class="num">12</td>
+        <td class="num">1</td>
+        <td class="num">11.20</td>
+        <td class="num">30</td>
+        <td class="vil"><span class="c v">金堂村</span><span class="c v">大山川村</span><span class="c v">贾家铺村</span><span class="c v">联坪村</span><span class="c v">何家川村</span><span class="c v">太平店村</span><span class="c v">万沟坪村</span><span class="c v">牛家坪村</span><span class="c v">大山顶村</span><span class="c v">代家湾村</span><span class="c v">青江驿村</span><span class="c v">苏家岘村</span><span class="c m">兴平社区</span></td>
+      </tr>
+      <tr data-area="329" data-pop="22079" data-vil="9" data-farm="11" data-dist="30">
+        <td class="nm">甘沟驿镇</td>
+        <td class="ty">镇</td>
+        <td class="num">329</td>
+        <td class="num">22,079</td>
+        <td class="num">5,077</td>
+        <td class="num">9</td>
+        <td class="num">1</td>
+        <td class="num">11.00</td>
+        <td class="num">30</td>
+        <td class="vil"><span class="c v">甘沟村</span><span class="c v">河西坡村</span><span class="c v">田坪村</span><span class="c v">大窑村</span><span class="c v">田岔村</span><span class="c v">袁岸村</span><span class="c v">修岔村</span><span class="c v">东岔村</span><span class="c v">钟家岔村</span><span class="c m">甘润苑社区</span></td>
+      </tr>
+      <tr data-area="112.3" data-pop="13634" data-vil="7" data-farm="5.96" data-dist="30">
+        <td class="nm">侯家川镇</td>
+        <td class="ty">镇</td>
+        <td class="num">112.3</td>
+        <td class="num">13,634</td>
+        <td class="num">3,199</td>
+        <td class="num">7</td>
+        <td class="num">1</td>
+        <td class="num">5.96</td>
+        <td class="num">30</td>
+        <td class="vil"><span class="c v">邢郡村</span><span class="c v">白顾村</span><span class="c v">下川村</span><span class="c v">葛家滩村</span><span class="c v">侯家川村</span><span class="c v">古道岔村</span><span class="c v">芦河村</span><span class="c m">齐靳社区</span></td>
+      </tr>
+      <tr data-area="279" data-pop="19628" data-vil="11" data-farm="10.3" data-dist="999">
+        <td class="nm">柴家门镇</td>
+        <td class="ty">镇</td>
+        <td class="num">279</td>
+        <td class="num">19,628</td>
+        <td class="num">4,757</td>
+        <td class="num">11</td>
+        <td class="num">4</td>
+        <td class="num">10.30</td>
+        <td class="num">—</td>
+        <td class="vil"><span class="c v">宝川村</span><span class="c v">孙去村</span><span class="c v">冯严村</span><span class="c v">二十铺村</span><span class="c v">何门村</span><span class="c v">柴门村</span><span class="c v">樊郭村</span><span class="c v">鸡儿咀村</span><span class="c v">寺南村</span><span class="c v">阳坡村</span><span class="c v">小西村</span><span class="c m">二十铺社区</span><span class="c m">金湾社区</span><span class="c m">寨子社区</span><span class="c m">西雁社区</span></td>
+      </tr>
+      <tr data-area="387.5" data-pop="21920" data-vil="12" data-farm="18.16" data-dist="999">
+        <td class="nm">汉家岔镇</td>
+        <td class="ty">镇</td>
+        <td class="num">387.5</td>
+        <td class="num">21,920</td>
+        <td class="num">5,064</td>
+        <td class="num">12</td>
+        <td class="num">1</td>
+        <td class="num">18.16</td>
+        <td class="num">—</td>
+        <td class="vil"><span class="c v">杨家山村</span><span class="c v">花儿岔村</span><span class="c v">赵家岔村</span><span class="c v">汉家岔村</span><span class="c v">大庄村</span><span class="c v">细岔村</span><span class="c v">南湾村</span><span class="c v">阴山村</span><span class="c v">双庙村</span><span class="c v">王马山村</span><span class="c v">荆家坪村</span><span class="c v">塔寺岔村</span><span class="c m">甘泉社区</span></td>
+      </tr>
+      <tr data-area="297.3" data-pop="20066" data-vil="11" data-farm="12.1" data-dist="120">
+        <td class="nm">刘家寨子镇</td>
+        <td class="ty">镇</td>
+        <td class="num">297.3</td>
+        <td class="num">20,066</td>
+        <td class="num">4,272</td>
+        <td class="num">11</td>
+        <td class="num">1</td>
+        <td class="num">12.10</td>
+        <td class="num">120</td>
+        <td class="vil"><span class="c v">寨柯村</span><span class="c v">刘寨村</span><span class="c v">张湾村</span><span class="c v">二塬村</span><span class="c v">陈庄村</span><span class="c v">后湾村</span><span class="c v">甜水井村</span><span class="c v">元淌村</span><span class="c v">斜沟村</span><span class="c v">后沟村</span><span class="c v">李塬村</span><span class="c m">汇鑫源社区</span></td>
+      </tr>
+      <tr data-area="175" data-pop="25265" data-vil="8" data-farm="7.5" data-dist="999">
+        <td class="nm">白草塬镇</td>
+        <td class="ty">镇</td>
+        <td class="num">175</td>
+        <td class="num">25,265</td>
+        <td class="num">5,576</td>
+        <td class="num">8</td>
+        <td class="num">1</td>
+        <td class="num">7.50</td>
+        <td class="num">—</td>
+        <td class="vil"><span class="c v">二百户村</span><span class="c v">北刘家村</span><span class="c v">窟沱村</span><span class="c v">总堡村</span><span class="c v">西坡村</span><span class="c v">上树儿王家村</span><span class="c v">景家庄村</span><span class="c v">九百户村</span><span class="c m">兴塬社区</span></td>
+      </tr>
+      <tr data-area="343.5" data-pop="19494" data-vil="14" data-farm="16.6" data-dist="999">
+        <td class="nm">大沟镇</td>
+        <td class="ty">镇</td>
+        <td class="num">343.5</td>
+        <td class="num">19,494</td>
+        <td class="num">4,625</td>
+        <td class="num">14</td>
+        <td class="num">1</td>
+        <td class="num">16.60</td>
+        <td class="num">—</td>
+        <td class="vil"><span class="c v">张屲村</span><span class="c v">大沟村</span><span class="c v">韩岔村</span><span class="c v">刘沟村</span><span class="c v">厍弆村</span><span class="c v">庄湾村</span><span class="c v">掌里村</span><span class="c v">郭庄村</span><span class="c v">北山村</span><span class="c v">孟窑村</span><span class="c v">新坪村</span><span class="c v">宋坪村</span><span class="c v">王集村</span><span class="c v">通安村</span><span class="c m">宝川社区</span></td>
+      </tr>
+      <tr data-area="258.8" data-pop="19008" data-vil="10" data-farm="12.7" data-dist="63">
+        <td class="nm">四房吴镇</td>
+        <td class="ty">镇</td>
+        <td class="num">258.8</td>
+        <td class="num">19,008</td>
+        <td class="num">5,203</td>
+        <td class="num">10</td>
+        <td class="num">1</td>
+        <td class="num">12.70</td>
+        <td class="num">63</td>
+        <td class="vil"><span class="c v">三房村</span><span class="c v">大房村</span><span class="c v">四房村</span><span class="c v">小南村</span><span class="c v">大南村</span><span class="c v">湾口村</span><span class="c v">坡里村</span><span class="c v">范沟村</span><span class="c v">蔺湾村</span><span class="c v">朱沟村</span><span class="c m">南张社区</span></td>
+      </tr>
+      <tr data-area="138" data-pop="15989" data-vil="10" data-farm="9.85" data-dist="23">
+        <td class="nm">中川镇</td>
+        <td class="ty">镇</td>
+        <td class="num">138</td>
+        <td class="num">15,989</td>
+        <td class="num">3,725</td>
+        <td class="num">10</td>
+        <td class="num">1</td>
+        <td class="num">9.85</td>
+        <td class="num">23</td>
+        <td class="vil"><span class="c v">糜岔村</span><span class="c v">中川村</span><span class="c v">老鸦村</span><span class="c v">三岘村</span><span class="c v">高陵村</span><span class="c v">王磨村</span><span class="c v">高庙村</span><span class="c v">梁堡村</span><span class="c v">化合村</span><span class="c v">大墩村</span><span class="c m">南峪川社区</span></td>
+      </tr>
+      <tr data-area="138.3" data-pop="21075" data-vil="13" data-farm="8.9" data-dist="44">
+        <td class="nm">老君坡镇</td>
+        <td class="ty">镇</td>
+        <td class="num">138.3</td>
+        <td class="num">21,075</td>
+        <td class="num">4,896</td>
+        <td class="num">13</td>
+        <td class="num">1</td>
+        <td class="num">8.90</td>
+        <td class="num">44</td>
+        <td class="vil"><span class="c v">河口村</span><span class="c v">窎岔村</span><span class="c v">柳家岔村</span><span class="c v">沙家寨子村</span><span class="c v">文家岔村</span><span class="c v">谢家岔村</span><span class="c v">谢家埂子村</span><span class="c v">阳赵村</span><span class="c v">老君坡村</span><span class="c v">高石崖村</span><span class="c v">张家川村</span><span class="c v">雷保岔村</span><span class="c v">方家坡村</span><span class="c m">文星社区</span></td>
+      </tr>
+      <tr data-area="138.27" data-pop="13419" data-vil="9" data-farm="7.48" data-dist="999">
+        <td class="nm">平头川镇</td>
+        <td class="ty">镇</td>
+        <td class="num">138.27</td>
+        <td class="num">13,419</td>
+        <td class="num">3,046</td>
+        <td class="num">9</td>
+        <td class="num">null</td>
+        <td class="num">7.48</td>
+        <td class="num">—</td>
+        <td class="vil"><span class="c v">青龙村</span><span class="c v">马路村</span><span class="c v">平头村</span><span class="c v">任湾村</span><span class="c v">张咀村</span><span class="c v">双头村</span><span class="c v">李湾村</span><span class="c v">万曲村</span><span class="c v">柳树沟村</span></td>
+      </tr>
+      <tr data-area="164" data-pop="18958" data-vil="10" data-farm="10.03" data-dist="21">
+        <td class="nm">丁家沟镇</td>
+        <td class="ty">镇</td>
+        <td class="num">164</td>
+        <td class="num">18,958</td>
+        <td class="num">4,505</td>
+        <td class="num">10</td>
+        <td class="num">null</td>
+        <td class="num">10.03</td>
+        <td class="num">21</td>
+        <td class="vil"><span class="c v">郝川村</span><span class="c v">南门村</span><span class="c v">窑沟村</span><span class="c v">马岔村</span><span class="c v">荔峡村</span><span class="c v">梁庄村</span><span class="c v">线川村</span><span class="c v">金滩村</span><span class="c v">沈屲村</span><span class="c v">慢湾村</span></td>
+      </tr>
+      <tr data-area="162.8" data-pop="20573" data-vil="12" data-farm="9.12" data-dist="58">
+        <td class="nm">杨崖集镇</td>
+        <td class="ty">镇</td>
+        <td class="num">162.8</td>
+        <td class="num">20,573</td>
+        <td class="num">4,973</td>
+        <td class="num">12</td>
+        <td class="num">1</td>
+        <td class="num">9.12</td>
+        <td class="num">58</td>
+        <td class="vil"><span class="c v">东阳村</span><span class="c v">杨集村</span><span class="c v">罐峡村</span><span class="c v">刘咀村</span><span class="c v">魏岔村</span><span class="c v">厍河村</span><span class="c v">红土村</span><span class="c v">陇川村</span><span class="c v">王湾村</span><span class="c v">姚坡村</span><span class="c v">邢坪村</span><span class="c v">北坪村</span><span class="c m">佳旭社区</span></td>
+      </tr>
+      <tr data-area="181.9" data-pop="18688" data-vil="12" data-farm="8.83" data-dist="19">
+        <td class="nm">翟家所镇</td>
+        <td class="ty">镇</td>
+        <td class="num">181.9</td>
+        <td class="num">18,688</td>
+        <td class="num">4,703</td>
+        <td class="num">12</td>
+        <td class="num">1</td>
+        <td class="num">8.83</td>
+        <td class="num">19</td>
+        <td class="vil"><span class="c v">焦家河村</span><span class="c v">张城堡村</span><span class="c v">高咀村</span><span class="c v">杜湾村</span><span class="c v">六房村</span><span class="c v">新智村</span><span class="c v">夏阳村</span><span class="c v">陈湾村</span><span class="c v">观音村</span><span class="c v">张岔村</span><span class="c v">塬坪村</span><span class="c v">翟家所村</span><span class="c m">平政社区</span></td>
+      </tr>
+      <tr data-area="188.7" data-pop="17221" data-vil="8" data-farm="8.56" data-dist="38">
+        <td class="nm">韩家集镇</td>
+        <td class="ty">镇</td>
+        <td class="num">188.7</td>
+        <td class="num">17,221</td>
+        <td class="num">3,914</td>
+        <td class="num">8</td>
+        <td class="num">1</td>
+        <td class="num">8.56</td>
+        <td class="num">38</td>
+        <td class="vil"><span class="c v">云台山村</span><span class="c v">韩集村</span><span class="c v">苟家岘村</span><span class="c v">袁家坪村</span><span class="c v">袁家咀村</span><span class="c v">谷地场村</span><span class="c v">周家湾村</span><span class="c v">东西坡村</span><span class="c m">昌富社区</span></td>
+      </tr>
+      <tr data-area="185" data-pop="10597" data-vil="6" data-farm="5.42" data-dist="100">
+        <td class="nm">土门岘镇</td>
+        <td class="ty">镇</td>
+        <td class="num">185</td>
+        <td class="num">10,597</td>
+        <td class="num">2,310</td>
+        <td class="num">6</td>
+        <td class="num">null</td>
+        <td class="num">5.42</td>
+        <td class="num">100</td>
+        <td class="vil"><span class="c v">土门村</span><span class="c v">苏堡村</span><span class="c v">杨岘村</span><span class="c v">张门村</span><span class="c v">安坡村</span><span class="c v">张沟村</span></td>
+      </tr>
+      <tr data-area="287.3" data-pop="13800" data-vil="8" data-farm="1.06" data-dist="120">
+        <td class="nm">新塬镇</td>
+        <td class="ty">镇</td>
+        <td class="num">287.3</td>
+        <td class="num">13,800</td>
+        <td class="num">3,024</td>
+        <td class="num">8</td>
+        <td class="num">1</td>
+        <td class="num">1.06</td>
+        <td class="num">120</td>
+        <td class="vil"><span class="c v">新塬村</span><span class="c v">上塬村</span><span class="c v">孟塬村</span><span class="c v">甘岔村</span><span class="c v">河坝村</span><span class="c v">老庄村</span><span class="c v">常坪村</span><span class="c v">杨坪村</span><span class="c m">刘家湾社区</span></td>
+      </tr>
+      <tr data-area="210" data-pop="13180" data-vil="7" data-farm="10.5" data-dist="90">
+        <td class="nm">草滩镇</td>
+        <td class="ty">镇</td>
+        <td class="num">210</td>
+        <td class="num">13,180</td>
+        <td class="num">3,760</td>
+        <td class="num">7</td>
+        <td class="num">null</td>
+        <td class="num">10.50</td>
+        <td class="num">90</td>
+        <td class="vil"><span class="c v">麦李村</span><span class="c v">油房沟村</span><span class="c v">断岘村</span><span class="c v">姚岔村</span><span class="c v">孔寨村</span><span class="c v">杨川村</span><span class="c v">殿坪村</span></td>
+      </tr>
+      <tr data-area="332" data-pop="13409" data-vil="8" data-farm="11.2" data-dist="90">
+        <td class="nm">新庄塬镇</td>
+        <td class="ty">镇</td>
+        <td class="num">332</td>
+        <td class="num">13,409</td>
+        <td class="num">3,628</td>
+        <td class="num">8</td>
+        <td class="num">null</td>
+        <td class="num">11.20</td>
+        <td class="num">90</td>
+        <td class="vil"><span class="c v">杜岘村</span><span class="c v">巩昌村</span><span class="c v">新庄村</span><span class="c v">寺寨村</span><span class="c v">泉坪村</span><span class="c v">中吊村</span><span class="c v">杨赵村</span><span class="c v">杨岔村</span></td>
+      </tr>
+      <tr data-area="208" data-pop="18785" data-vil="13" data-farm="0" data-dist="999">
+        <td class="nm">新添堡回族乡</td>
+        <td class="ty">民族乡</td>
+        <td class="num">208</td>
+        <td class="num">18,785</td>
+        <td class="num">3,722</td>
+        <td class="num">13</td>
+        <td class="num">null</td>
+        <td class="num">—</td>
+        <td class="num">—</td>
+        <td class="vil"><span class="c v">道口村</span><span class="c v">新添村</span><span class="c v">彭湾村</span><span class="c v">涝池村</span><span class="c v">炭山村</span><span class="c v">河屲村</span><span class="c v">回河村</span><span class="c v">芦岔村</span><span class="c v">沙湾村</span><span class="c v">大寺村</span><span class="c v">三合村</span><span class="c v">三岔村</span><span class="c v">苦水村</span></td>
+      </tr>
+      <tr data-area="149" data-pop="18831" data-vil="10" data-farm="8.41" data-dist="40">
+        <td class="nm">党家岘乡</td>
+        <td class="ty">乡</td>
+        <td class="num">149</td>
+        <td class="num">18,831</td>
+        <td class="num">4,181</td>
+        <td class="num">10</td>
+        <td class="num">null</td>
+        <td class="num">8.41</td>
+        <td class="num">40</td>
+        <td class="vil"><span class="c v">新民村</span><span class="c v">党岘村</span><span class="c v">杨湾村</span><span class="c v">吕堡村</span><span class="c v">上秀村</span><span class="c v">庙儿村</span><span class="c v">砖井村</span><span class="c v">大寨村</span><span class="c v">梁河村</span><span class="c v">毛坪村</span></td>
+      </tr>
+      <tr data-area="195" data-pop="20035" data-vil="11" data-farm="12.3" data-dist="27">
+        <td class="nm">八里湾乡</td>
+        <td class="ty">乡</td>
+        <td class="num">195</td>
+        <td class="num">20,035</td>
+        <td class="num">4,741</td>
+        <td class="num">11</td>
+        <td class="num">null</td>
+        <td class="num">12.30</td>
+        <td class="num">27</td>
+        <td class="vil"><span class="c v">陈去村</span><span class="c v">富岔村</span><span class="c v">旮旯村</span><span class="c v">大水村</span><span class="c v">八里村</span><span class="c v">百户村</span><span class="c v">李湾村</span><span class="c v">芦坪村</span><span class="c v">复兴村</span><span class="c v">团结村</span><span class="c v">苟川村</span></td>
+      </tr>
+      <tr data-area="245.8" data-pop="10150" data-vil="6" data-farm="0" data-dist="107">
+        <td class="nm">土高山乡</td>
+        <td class="ty">乡</td>
+        <td class="num">245.8</td>
+        <td class="num">10,150</td>
+        <td class="num">2,123</td>
+        <td class="num">6</td>
+        <td class="num">null</td>
+        <td class="num">—</td>
+        <td class="num">107</td>
+        <td class="vil"><span class="c v">上沟村</span><span class="c v">程家塬村</span><span class="c v">中庄村</span><span class="c v">马家塬村</span><span class="c v">十百户村</span><span class="c v">红湾村</span></td>
+      </tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel">
+    <h2>口径说明</h2>
+    <ul class="note"><li>面积、人口、耕地、村/社区数量来自官网「会宁概况」栏目，各篇更新年份不同（2018—2026），属官方公布值而非同一普查口径。</li><li>村、社区名单来自「村务公开」栏目（现行建制，更新至 2026 年），比概况页数字更实时，故以名单实际条数为准，概况数字保留在 profileVillageCount 供对照。</li><li>会师镇人口含县城流动人口与在校学生，会师镇、郭城驿镇、柴家门镇等同时公布城镇/农业人口，已单列。</li><li>村/社区采集数略少于县公布数，系部分乡镇「村务公开」栏目未公开全部建制村，属可采集范围内的上限。</li><li>距县城：优先用官网公布的公路里程（distanceToCountyKm），另附按经纬度计算的直线距离（straightLineKm）供参考，两者不可混用。</li>
+      <li>会师镇为县城驻地，总人口含流动人口与在校学生（74,900 人），户籍口径为城镇 + 农业人口。</li>
+      <li>数据文件：<code>public/geo/towns/620422_info.json</code>（schema maps-dashboard/town-info@1）</li>
+    </ul>
+  </div>
+
+<script>
+document.querySelectorAll('#t th[data-i]').forEach(th => {
+  let asc = false
+  th.onclick = () => {
+    const i = +th.dataset.i
+    const tb = document.querySelector('#t tbody')
+    const rows = [...tb.rows]
+    asc = !asc
+    rows.sort((x, y) => {
+      const a = parseFloat(x.cells[i].textContent.replace(/[,，]/g, '')) || 0
+      const b = parseFloat(y.cells[i].textContent.replace(/[,，]/g, '')) || 0
+      return asc ? a - b : b - a
+    })
+    rows.forEach(r => tb.appendChild(r))
+  }
+})
+</script>
+</body>
+</html>

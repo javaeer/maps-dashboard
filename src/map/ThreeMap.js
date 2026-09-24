@@ -2,10 +2,13 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { createComposer } from '../effects/bloom.js'
 import { createExtrudedMap, createTownMap } from './extrude.js'
-import { loadGeoJSON, loadTowns, loadCountyGeo, loadTownGeo } from './geoLoader.js'
+import { loadGeoJSON, loadTowns, loadCountyGeo, loadTownGeo, loadTownInfo } from './geoLoader.js'
 import { createRipple } from '../effects/ripple.js'
 import { createFlyLine } from '../effects/flyLine.js'
 import { createTownMarker, createTownLabel, geoToWorld } from '../effects/town.js'
+import { RoutePath } from '../effects/routePath.js'
+import { resolveTheme } from './palette.js'
+import { findTownInfo, townToDisplay } from '../utils/townName.js'
 
 const MAP_W = 1024
 // 拉伸高度取地图宽度的 ~7%，避免区域变成"通天柱"
@@ -14,9 +17,11 @@ const DEPTH = 70
 const TOWN_DEPTH = 12
 
 export class ThreeMap {
-  constructor(container, { onSelect, onBreadcrumb, onSelectTown, onTownEmpty } = {}) {
+  constructor(container, { onSelect, onBreadcrumb, onSelectTown, onTownEmpty, onTownInfo, onRouteChange } = {}) {
     this.container = container
     this.onSelect = onSelect || (() => {})
+    this.onTownInfo = onTownInfo || (() => {})
+    this.onRouteChange = onRouteChange || (() => {})
     this.onBreadcrumb = onBreadcrumb || (() => {})
     this.onSelectTown = onSelectTown || (() => {})
     this.onTownEmpty = onTownEmpty || (() => {})
@@ -39,9 +44,20 @@ export class ThreeMap {
     this.flyLines = []
     this.focusTarget = null
     this.focusPos = null
+    // 路径管道 + 巡航跟拍
+    this.route = null          // 在 _init() 之后创建（依赖 scene）
+    this.cruising = false
+    this.cruiseT = 0
+    this.cruiseSpeed = 260     // 世界单位 / 秒
+    this.cruiseLook = null
+    this.unitsPerKm = null     // 当前县级投影下 1 公里 ≈ 多少世界单位（长度/速度换算用）
     this.clock = new THREE.Clock()
+    // 配色主题：支持 URL 参数 ?palette=tech|aurora|sunset 现场切换
+    this.theme = resolveTheme()
 
     this._init()
+    // 路径管道：悬浮在乡镇顶面之上（centerWorld 本身已在顶面，再抬 46）
+    this.route = new RoutePath({ scene: this.scene, lift: 46 })
     this._bindEvents()
     this._tick = () => this._animate()
     requestAnimationFrame(this._tick)
@@ -119,7 +135,12 @@ export class ThreeMap {
       if (p.adcode != null) this.nameMap[p.adcode] = p.name || p.adcode
     })
 
-    const built = createExtrudedMap(geo, { width: MAP_W, height: MAP_W, depth: DEPTH })
+    const built = createExtrudedMap(geo, {
+      width: MAP_W,
+      height: MAP_W,
+      depth: DEPTH,
+      theme: this.theme
+    })
     this.mapGroup = built.group
     this.featureGroups = built.featureGroups
     this.sideMaterials = built.sideMaterials
@@ -169,6 +190,17 @@ export class ThreeMap {
     const g = new THREE.Group()
     let any = false
 
+    // 展示信息（人口 / 面积 / 下辖村社区 / 联系方式）：与边界并行加载，缺失不影响渲染
+    let townInfo = null
+    try {
+      townInfo = await loadTownInfo(adcode)
+    } catch (e) {
+      console.warn('[maps-dashboard] 乡镇展示信息加载失败', adcode, e)
+    }
+    this.townInfo = townInfo
+    this.townInfoMap = townInfo && townInfo.towns ? townInfo.towns : []
+    if (townInfo) this.onTownInfo(townInfo)
+
     let townGeo = null
     try {
       townGeo = await loadTownGeo(adcode)
@@ -178,7 +210,7 @@ export class ThreeMap {
     if (townGeo && townGeo.features && townGeo.features.length && this.projection) {
       // 真实乡镇边界子图层
       try {
-        const built = createTownMap(townGeo, this.projection, MAP_W, DEPTH, TOWN_DEPTH)
+        const built = createTownMap(townGeo, this.projection, MAP_W, DEPTH, TOWN_DEPTH, this.theme)
         this.townSideMaterials = built.sideMaterials
         this.townFeatureGroups = built.featureGroups
         if (built.featureGroups.length) g.add(built.group)
@@ -188,6 +220,8 @@ export class ThreeMap {
           const town = {
             name: tname,
             level: '乡镇',
+            population: null,
+            area: null,
             meta: {
               attrs: [
                 ['省', props.province],
@@ -197,6 +231,9 @@ export class ThreeMap {
               ].filter((x) => x[1])
             }
           }
+          // 合并官方展示信息（边界数据用的是旧名，按核心名匹配）
+          const info = findTownInfo(tname, this.townInfoMap)
+          if (info) Object.assign(town, townToDisplay(info, tname))
           fg.userData.town = town
           const label = createTownLabel(tname, fg.userData.centerWorld)
           label.visible = false
@@ -215,7 +252,8 @@ export class ThreeMap {
       const towns = await loadTowns(adcode)
       if (towns && towns.length) {
         for (const t of towns) {
-          const marker = createTownMarker(t, this.projection, MAP_W, DEPTH)
+          const info = findTownInfo(t.name, this.townInfoMap)
+          const marker = createTownMarker(info ? { ...t, ...townToDisplay(info) } : t, this.projection, MAP_W, DEPTH)
           if (marker) {
             g.add(marker)
             any = true
@@ -237,6 +275,8 @@ export class ThreeMap {
     if (c && this.projection) {
       const cw = geoToWorld(this.projection, MAP_W, DEPTH, c[0], c[1])
       if (cw) this._focus(cw.clone(), cw.clone().add(new THREE.Vector3(0, 520, 760)))
+      // 墨卡托在局部是等角的，用县中心处"1 公里经度差"换算出世界单位/公里
+      this.unitsPerKm = this._estimateUnitsPerKm(c)
     }
     // 县 adcode 已入栈时（由 drill 渲染县级底图）不再追加名称，避免面包屑重复
     const names = this.adcodeStack.map((a) => this.nameMap[a] || a)
@@ -271,6 +311,15 @@ export class ThreeMap {
     this.townAdcode = null
     this.townSideMaterials = []
     this.townFeatureGroups = []
+    this.unitsPerKm = null
+    // 乡镇视图销毁 → 路径点所属坐标系失效，一并清空（不通知 UI 重建动画）
+    if (this.route && this.route.count) {
+      this.cruising = false
+      this.cruiseT = 0
+      this.cruiseLook = null
+      this.route.clear()
+      this.onRouteChange(this.routeState(), null)
+    }
   }
 
   back() {
@@ -353,13 +402,116 @@ export class ThreeMap {
     }
     const town = fg.userData.town
     const world = (fg.userData.centerWorld || new THREE.Vector3()).clone()
-    this._focus(
-      world.clone().add(new THREE.Vector3(0, 10, 0)),
-      world.clone().add(new THREE.Vector3(0, 360, 560))
-    )
+
+    // 闭环第 1 步：把该乡镇追加为路径点（巡航中先停下，交回相机控制权）
+    let routeResult = null
+    if (this.route) {
+      if (this.cruising) this.stopCruise()
+      routeResult = this.route.addPoint(world, { name: town.name, adcode: town.info && town.info.adcode })
+      if (routeResult.added) {
+        // 闭环第 2 步由 RoutePath 完成（分段管道即时生长）
+        // 闭环第 3 步：相机平滑飞向新追加的点
+        this._focus(
+          world.clone().add(new THREE.Vector3(0, 10, 0)),
+          world.clone().add(new THREE.Vector3(0, 360, 560))
+        )
+      }
+      this.onRouteChange(this.routeState(), routeResult)
+    }
+
     this._clearEffects()
     this.ripples.push(createRipple(world.clone()))
     this.onSelectTown(town)
+  }
+
+  // ---------- 路径管道 / 巡航跟拍 ----------
+
+  /** 用县中心的投影局部尺度估算 1 公里 ≈ 多少世界单位 */
+  _estimateUnitsPerKm(center) {
+    if (!center || !this.projection) return null
+    const lng = center[0]
+    const lat = center[1]
+    const dLng = 1 / (111.32 * Math.cos((lat * Math.PI) / 180))
+    const a = geoToWorld(this.projection, MAP_W, DEPTH, lng, lat)
+    const b = geoToWorld(this.projection, MAP_W, DEPTH, lng + dLng, lat)
+    if (!a || !b) return null
+    const d = a.distanceTo(b)
+    return d > 0 ? d : null
+  }
+
+  routeState() {
+    const r = this.route
+    const u = this.unitsPerKm
+    const toKm = (v) => (u ? +(v / u).toFixed(1) : null)
+    if (!r) return { stops: [], count: 0, length: 0, lengthText: '0 km', cruising: false, speed: 0, speedKmh: null }
+    const km = toKm(r.totalLength)
+    return {
+      stops: r.stops.map((s, i) => ({ index: i + 1, name: s.name, adcode: s.adcode })),
+      count: r.count,
+      length: km != null ? km : Math.round(r.totalLength),
+      // 拿不到投影尺度时退回世界单位，不谎报 km
+      lengthText: km != null ? `${km} km` : `${Math.round(r.totalLength)} 单位`,
+      cruising: this.cruising,
+      speed: this.cruiseSpeed,
+      speedKmh: toKm(this.cruiseSpeed * 3.6)
+    }
+  }
+
+  /** 沿管道全程巡航跟拍；不足 2 个点时无法成线 */
+  startCruise() {
+    if (!this.route || this.route.count < 2) return false
+    this.cruising = true
+    if (this.cruiseT >= 1) this.cruiseT = 0
+    this.cruiseLook = this.cruiseLook || this.controls.target.clone()
+    // 让出相机：清空单击聚焦目标，避免两套插值互相拉扯
+    this.focusTarget = null
+    this.focusPos = null
+    return true
+  }
+
+  stopCruise() {
+    if (!this.cruising) return false
+    this.cruising = false
+    // 把巡航末帧的视点交回 OrbitControls，退出后不会突然跳镜头
+    if (this.cruiseLook) {
+      this.controls.target.copy(this.cruiseLook)
+      this.controls.update()
+    }
+    return true
+  }
+
+  toggleCruise() {
+    return this.cruising ? (this.stopCruise(), false) : (this.startCruise(), this.cruising)
+  }
+
+  setCruiseSpeed(v) {
+    this.cruiseSpeed = Math.max(40, Math.min(1200, Number(v) || 260))
+    this.onRouteChange(this.routeState(), null)
+  }
+
+  clearRoute() {
+    if (!this.route) return
+    this.stopCruise()
+    this.cruiseT = 0
+    this.cruiseLook = null
+    this.route.clear()
+    this.onRouteChange(this.routeState(), null)
+  }
+
+  removeLastStop() {
+    if (!this.route || !this.route.count) return
+    this.stopCruise()
+    this.route.removeLast()
+    this.cruiseT = 0
+    this.onRouteChange(this.routeState(), null)
+  }
+
+  /** 点击路径列表某项：相机飞回该路径点 */
+  focusRouteStop(i) {
+    if (!this.route || !this.route.points[i]) return
+    this.stopCruise()
+    const p = this.route.points[i]
+    this._focus(p.clone(), p.clone().add(new THREE.Vector3(0, 380, 620)))
   }
 
   // 乡镇悬停：显示名称标签 + 手型指针（标签默认隐藏，避免几十个标签叠成白色光斑）
@@ -477,6 +629,19 @@ export class ThreeMap {
     el.addEventListener('dblclick', this._onDblClick)
     el.addEventListener('contextmenu', this._onContext)
     window.addEventListener('resize', this._onResize)
+    // 全屏：元素进入/退出全屏时容器尺寸变化，window 的 resize 不保证触发，
+    // 用 ResizeObserver 直接盯容器 + fullscreenchange 兜底
+    document.addEventListener('fullscreenchange', this._onResize)
+    document.addEventListener('webkitfullscreenchange', this._onResize)
+    if (typeof ResizeObserver !== 'undefined') {
+      this._ro = new ResizeObserver(() => this._resize())
+      this._ro.observe(this.container)
+    }
+  }
+
+  /** 供外部（如全屏切换）主动触发一次重排 */
+  resize() {
+    this._resize()
   }
 
   _resize() {
@@ -517,16 +682,37 @@ export class ThreeMap {
     this.townSideMaterials.forEach((m) => {
       m.uniforms.uTime.value = el
     })
-    this.controls.update()
-    // 选中或镜头聚焦动画期间暂停自动旋转
-    this.controls.autoRotate = !this.selected && !this.selectedTown && !this.focusTarget
+    // 巡航跟拍：接管相机，期间跳过 OrbitControls，避免两套插值互相拉扯
+    if (this.cruising && this.route && this.route.count >= 2) {
+      const len = Math.max(this.route.totalLength, 1)
+      this.cruiseT += (dt * this.cruiseSpeed) / len
+      if (this.cruiseT >= 1) this.cruiseT -= 1 // 循环巡航
+      const s = this.route.sampleAt(this.cruiseT)
+      if (s) {
+        // 相机挂在采样点后上方，视线落在前方一段距离处 → 形成"跟拍"视角
+        const want = s.position.clone()
+          .sub(s.tangent.clone().multiplyScalar(210))
+          .add(new THREE.Vector3(0, 135, 0))
+        const look = s.position.clone().add(s.tangent.clone().multiplyScalar(160))
+        this.camera.position.lerp(want, 0.09)
+        if (!this.cruiseLook) this.cruiseLook = look.clone()
+        this.cruiseLook.lerp(look, 0.12)
+        this.camera.lookAt(this.cruiseLook)
+        this.controls.target.copy(this.cruiseLook)
+      }
+      this.controls.autoRotate = false
+    } else {
+      this.controls.update()
+      // 选中或镜头聚焦动画期间暂停自动旋转
+      this.controls.autoRotate = !this.selected && !this.selectedTown && !this.focusTarget
 
-    if (this.focusTarget) {
-      this.controls.target.lerp(this.focusTarget, 0.08)
-      this.camera.position.lerp(this.focusPos, 0.08)
-      if (this.camera.position.distanceTo(this.focusPos) < 6) {
-        this.focusTarget = null
-        this.focusPos = null
+      if (this.focusTarget) {
+        this.controls.target.lerp(this.focusTarget, 0.08)
+        this.camera.position.lerp(this.focusPos, 0.08)
+        if (this.camera.position.distanceTo(this.focusPos) < 6) {
+          this.focusTarget = null
+          this.focusPos = null
+        }
       }
     }
 
@@ -539,6 +725,7 @@ export class ThreeMap {
       return alive
     })
     this.flyLines.forEach((f) => f.update(dt))
+    if (this.route) this.route.update(dt)
 
     this.composer.render()
     requestAnimationFrame(this._tick)
@@ -546,6 +733,10 @@ export class ThreeMap {
 
   dispose() {
     window.removeEventListener('resize', this._onResize)
+    document.removeEventListener('fullscreenchange', this._onResize)
+    document.removeEventListener('webkitfullscreenchange', this._onResize)
+    if (this._ro) this._ro.disconnect()
+    if (this.route) this.route.dispose()
     const el = this.renderer.domElement
     el.removeEventListener('click', this._onClick)
     el.removeEventListener('pointermove', this._onMove)

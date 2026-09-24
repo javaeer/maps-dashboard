@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "fetch-geo": "node scripts/fetch-geo.mjs",
     "fetch-town-geo": "node scripts/fetch-town-geo.mjs",
+    "fetch-town-info": "node scripts/fetch-town-info.mjs",
+    "town-report": "node scripts/build-town-report.mjs",
     "build-towns": "node scripts/build-towns.mjs"
   },
   "keywords": [

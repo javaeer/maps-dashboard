@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { geoMercator } from 'd3-geo'
+import { getTheme, themeColor } from './palette.js'
 
 // 侧面扫光 Shader（借鉴 threemap 方案）：沿拉伸高度方向做一条循环流动的亮带
 const sideVertexShader = /* glsl */ `
@@ -120,6 +121,7 @@ export function createExtrudedMap(geojson, opts = {}) {
   const W = opts.width || 1024
   const H = opts.height || 1024
   const depth = opts.depth || 70
+  const theme = getTheme(opts.theme)
 
   const projection = createFittedProjection(geojson, W, H)
 
@@ -135,9 +137,9 @@ export function createExtrudedMap(geojson, opts = {}) {
     const shapes = buildShapes(feature, projection, W, H)
     if (!shapes.length) return
 
-    // 科技蓝青色系：色相在 190~235 间小幅错开，饱和度/亮度统一
-    const hue = 190 + (idx * 13) % 45
-    const baseColor = new THREE.Color().setHSL(hue / 360, 0.68, 0.55)
+    // 主题配色：色相按黄金角错开，相邻区域色差最大，整体落在主题色域内
+    const tc = themeColor(theme.county, idx)
+    const baseColor = new THREE.Color().setHSL(tc.h, tc.s, tc.l)
 
     const capMat = new THREE.MeshStandardMaterial({
       color: baseColor,
@@ -152,7 +154,7 @@ export function createExtrudedMap(geojson, opts = {}) {
         uTime: { value: 0 },
         uDepth: { value: depth },
         uColor: { value: baseColor.clone() },
-        uGlow: { value: new THREE.Color(0x6fd8ff) }
+        uGlow: { value: new THREE.Color(theme.countyGlow) }
       },
       vertexShader: sideVertexShader,
       fragmentShader: sideFragmentShader
@@ -161,7 +163,7 @@ export function createExtrudedMap(geojson, opts = {}) {
 
     // 顶面发光描边（共享材质，加色混合形成锐利边线）
     const borderMat = new THREE.LineBasicMaterial({
-      color: 0x9ffcff,
+      color: theme.border,
       transparent: true,
       opacity: 0.9,
       blending: THREE.AdditiveBlending,
@@ -215,7 +217,8 @@ export function createExtrudedMap(geojson, opts = {}) {
 
 // 乡镇边界子图层：复用「县」已有的投影，把每个乡镇多边形薄拉伸成浮雕，
 // 整体贴在县顶面（group.position.y = DEPTH）之上，形成可点击的乡镇拼图
-export function createTownMap(geojson, projection, W, DEPTH, townDepth) {
+export function createTownMap(geojson, projection, W, DEPTH, townDepth, themeName) {
+  const theme = getTheme(themeName)
   const H = W
   const group = new THREE.Group()
   group.rotation.x = -Math.PI / 2
@@ -244,9 +247,9 @@ export function createTownMap(geojson, projection, W, DEPTH, townDepth) {
     const shapes = buildShapes(feature, projection, W, H)
     if (!shapes.length) return
 
-    // 乡镇用青绿色系，与县级科技蓝区分开
-    const hue = 150 + (idx * 17) % 55
-    const baseColor = new THREE.Color().setHSL(hue / 360, 0.6, 0.55)
+    // 乡镇用主题的乡镇色域，与县级色域区分开
+    const tc = themeColor(theme.town, idx)
+    const baseColor = new THREE.Color().setHSL(tc.h, tc.s, tc.l)
 
     const capMat = new THREE.MeshStandardMaterial({
       color: baseColor,
@@ -260,7 +263,7 @@ export function createTownMap(geojson, projection, W, DEPTH, townDepth) {
         uTime: { value: 0 },
         uDepth: { value: townDepth },
         uColor: { value: baseColor.clone() },
-        uGlow: { value: new THREE.Color(0x7cffb0) }
+        uGlow: { value: new THREE.Color(theme.townGlow) }
       },
       vertexShader: sideVertexShader,
       fragmentShader: sideFragmentShader
@@ -268,7 +271,7 @@ export function createTownMap(geojson, projection, W, DEPTH, townDepth) {
     sideMaterials.push(sideMat)
 
     const borderMat = new THREE.LineBasicMaterial({
-      color: 0xcfffe9,
+      color: theme.townBorder,
       transparent: true,
       opacity: 0.85,
       blending: THREE.AdditiveBlending,
