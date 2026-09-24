@@ -26,8 +26,13 @@
   "license": "MIT",
   "dependencies": {
     "d3-geo": "^3.1.1",
+    "html2canvas": "^1.4.1",
+    "idb": "^8.0.3",
+    "papaparse": "^5.7.0",
+    "pinia": "^4.0.3",
     "three": "^0.160.1",
-    "vue": "^3.4.21"
+    "vue": "^3.4.21",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.4",

@@ -1,5 +1,5 @@
 <template>
-  <div ref="stage" class="stage" :class="{ 'is-fs': isFullscreen }">
+  <div ref="stage" class="stage" :class="{ 'is-fs': isFullscreen, recording: isRecording }">
     <div ref="container" class="map"></div>
 
     <header class="topbar">
@@ -22,6 +22,16 @@
       <div class="tools">
         <button
           class="fsbtn"
+          :title="`导入业务数据${store.dataSets.length ? `（已有 ${store.dataSets.length} 个数据集）` : ''}`"
+          @click="showImport = true"
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M8 10V2m0 0L5 5m3-3l3 3M2 11v2a1 1 0 001 1h10a1 1 0 001-1v-2" />
+          </svg>
+          <span>导入数据</span>
+        </button>
+        <button
+          class="fsbtn"
           :class="{ active: isFullscreen }"
           :title="isFullscreen ? '退出全屏（F / Esc）' : '全屏（F）'"
           @click="toggleFullscreen"
@@ -37,6 +47,14 @@
           <span>{{ isFullscreen ? '退出全屏' : '全屏' }}</span>
         </button>
       </div>
+
+      <!-- 录制控件独立于 .tools：录制时要隐藏 .tools，但录制按钮本身必须留着 -->
+      <RecordButton
+        :get-map="() => map"
+        :get-stage="() => stage"
+        :enabled="mapReady"
+        @state-change="isRecording = $event"
+      />
     </header>
 
     <div v-if="!hasRoute" class="hint">单击区域查看信息 · 双击下钻 · 右键返回 · 双击区县查看乡镇 · 进乡镇后依次单击即连成路径 · F 键全屏</div>
@@ -46,6 +64,9 @@
     </transition>
 
     <InfoPanel :data="selected" :source-label="townSource" @close="closePanel" />
+
+    <!-- 业务数据导入向导，由顶栏「导入数据」唤起 -->
+    <DataImportPanel v-if="showImport" @close="showImport = false" @imported="onImported" />
 
     <RouteBar
       :state="routeState"
@@ -68,6 +89,17 @@ import InfoPanel from './components/InfoPanel.vue'
 import Breadcrumb from './components/Breadcrumb.vue'
 import RouteBar from './components/RouteBar.vue'
 import { THEMES, resolveTheme } from './map/palette.js'
+import DataImportPanel from './components/DataImportPanel.vue'
+import RecordButton from './components/RecordButton.vue'
+import { useBusinessDataStore } from './stores/businessDataStore.js'
+
+// 业务数据集（IndexedDB 持久化），装载后可在顶栏按钮看到已有数量
+const store = useBusinessDataStore()
+const showImport = ref(false)
+
+function onImported(ds) {
+  showTownHint(`已导入「${ds.name}」，共 ${ds.recordCount} 条记录`)
+}
 
 // 主题切换器：每项给出 3 个代表色用于按钮渐变预览
 const themes = Object.fromEntries(
@@ -96,6 +128,10 @@ const breadcrumb = ref(['中国'])
 const townHint = ref('')
 const townSource = ref('')
 const isFullscreen = ref(false)
+// 地图初始化是否成功：WebGL 不可用时录制不可用，由这个开关关掉入口
+const mapReady = ref(false)
+// 录制进行中：给舞台挂 class，收起会干扰画面的控件
+const isRecording = ref(false)
 // 路径巡航状态：点击乡镇追加路径点 → 管道生长 → 可沿管道巡航跟拍
 const routeState = ref(null)
 const routeActive = ref(-1)
@@ -215,6 +251,9 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   isFullscreen.value = !!fsElement()
 
+  // 读取本机已导入的数据集；失败不影响地图本身，store 内部已记 error
+  store.load().catch(() => {})
+
   try {
     map = new ThreeMap(container.value, {
       onSelect: (feature) => {
@@ -246,6 +285,7 @@ onMounted(async () => {
       }
     })
     await map.load('100000')
+    mapReady.value = true
   } catch (e) {
     // 例如浏览器/驱动不支持 WebGL：给出提示而不是留一块黑屏
     console.error('[maps-dashboard] 地图初始化失败', e)
@@ -436,6 +476,15 @@ function closePanel() {
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.3s ease;
+}
+/* 录制期间淡出干扰画面的控件：主题色板、工具按钮、操作提示、浮层提示。
+   淡出而非 v-if 移除，避免布局抖动让画面发生位移。 */
+.stage.recording .tools,
+.stage.recording .palette,
+.stage.recording .hint,
+.stage.recording .toast {
+  opacity: 0;
+  pointer-events: none;
 }
 .fade-enter-from,
 .fade-leave-to {

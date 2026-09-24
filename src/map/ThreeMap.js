@@ -54,6 +54,8 @@ export class ThreeMap {
     this.clock = new THREE.Clock()
     // 配色主题：支持 URL 参数 ?palette=tech|aurora|sunset 现场切换
     this.theme = resolveTheme()
+    // 每帧渲染完成后的回调，供视频录制抓取画面；未设置时不产生任何开销
+    this.onFrame = null
 
     this._init()
     // 路径管道：悬浮在乡镇顶面之上（centerWorld 本身已在顶面，再抬 46）
@@ -728,6 +730,9 @@ export class ThreeMap {
     if (this.route) this.route.update(dt)
 
     this.composer.render()
+    // 录制钩子：composer.render() 之后、本帧结束之前，WebGL 的 drawing buffer 尚未被清，
+    // 此时 drawImage 才能取到画面（摄像机 out.clear() 或 buffer 交换后就读不到了）
+    if (this.onFrame) this.onFrame()
     requestAnimationFrame(this._tick)
   }
 
