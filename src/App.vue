@@ -20,6 +20,32 @@
       </div>
 
       <div class="tools">
+        <!-- 路径：点开即新建一条巡航路线，此后单击区域 / 乡镇都追加为路径点 -->
+        <button
+          class="fsbtn"
+          :class="{ active: routeEditing }"
+          :title="routeEditing ? '正在编辑路径：依次单击区域即可连成路线' : '新建一条巡航路径（省 / 市 / 区县 / 乡镇均可连线）'"
+          @click="onRouteNew"
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M2.5 12.5c2.4-6 4.6 0 7.2-5" />
+            <circle cx="2.5" cy="12.5" r="1.5" />
+            <circle cx="9.7" cy="7.5" r="1.5" />
+          </svg>
+          <span>路径</span>
+        </button>
+        <!-- 名称：在当前层级的板块上立体显示名称（全国显示省名，进省显示市名，依此类推） -->
+        <button
+          class="fsbtn"
+          :class="{ active: namesOn }"
+          :title="namesOn ? `关闭名称显示（本层 ${nameCount} 个）` : '在板块上立体显示本层级名称'"
+          @click="onToggleNames"
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M3 4.5h10M3 8h6.5M3 11.5h10" />
+          </svg>
+          <span>名称</span>
+        </button>
         <button
           class="fsbtn"
           :title="`导入业务数据${store.dataSets.length ? `（已有 ${store.dataSets.length} 个数据集）` : ''}`"
@@ -57,7 +83,7 @@
       />
     </header>
 
-    <div v-if="!hasRoute" class="hint">单击区域查看信息 · 双击下钻 · 右键返回 · 双击区县查看乡镇 · 进乡镇后依次单击即连成路径 · F 键全屏</div>
+    <div v-if="!hasRoute" class="hint">单击查看信息 · 双击下钻（区县→乡镇→村 / 社区）· 右键返回 · 「路径」把省 / 市 / 区县 / 乡镇连成巡航路线 · 「名称」显示本层地名 · F 键全屏</div>
 
     <transition name="fade">
       <div v-if="townHint" class="toast">{{ townHint }}</div>
@@ -73,10 +99,14 @@
       :active="routeActive"
       :hint="routeHint"
       @toggle="onRouteToggle"
+      @toggle-all="onRouteToggleAll"
       @clear="onRouteClear"
       @undo="onRouteUndo"
       @speed="onRouteSpeed"
       @focus="onRouteFocus"
+      @new-route="onRouteNew"
+      @select-route="onRouteSelect"
+      @remove-route="onRouteRemove"
     />
   </div>
 </template>
@@ -132,13 +162,27 @@ const isFullscreen = ref(false)
 const mapReady = ref(false)
 // 录制进行中：给舞台挂 class，收起会干扰画面的控件
 const isRecording = ref(false)
-// 路径巡航状态：点击乡镇追加路径点 → 管道生长 → 可沿管道巡航跟拍
+// 路径巡航状态：点击区域/乡镇追加路径点 → 管道生长 → 可沿管道巡航跟拍（支持多条路径）
 const routeState = ref(null)
 const routeActive = ref(-1)
 const routeHint = ref('')
+// 名称立体显示开关：状态持久在本机，跨层级保持（全国看省名、进省看市名）
+const namesOn = ref(false)
+const nameCount = ref(0)
+const NAMES_KEY = 'maps-dashboard:names-on'
+let namesWanted = false
+try {
+  namesWanted = localStorage.getItem(NAMES_KEY) === '1'
+} catch (e) {
+  /* 隐私模式下不可读，按关闭处理 */
+}
 let routeTimer = null
 let map = null
 let hintTimer = null
+
+// 是否正在编辑路径：以「是否选中了某条路径」为准。
+// 县级/村级不默认选中，只要用户没在路径面板点选，单击地图就只是看信息。
+const routeEditing = computed(() => !!(routeState.value && routeState.value.activeIndex >= 0))
 
 const LEVEL_LABEL = {
   country: '国家级',
@@ -185,10 +229,16 @@ function townToPanel(town) {
   }
 }
 
-function showTownHint(name) {
-  townHint.value = `「${name}」暂无镇级点位数据，可在 public/geo/towns/ 补录对应 adcode 的 JSON`
+// 通用 toast：直接展示传入文本，不包装话术（调用方各自负责文案）
+function showTownHint(text) {
+  townHint.value = text
   clearTimeout(hintTimer)
   hintTimer = setTimeout(() => (townHint.value = ''), 2800)
+}
+
+/** 乡镇视图整体为空（该县没有任何乡镇点位）：给出可操作的补录指引 */
+function showTownEmptyHint(name) {
+  showTownHint(`「${name}」暂无镇级点位数据，可在 public/geo/towns/ 补录对应 adcode 的 JSON`)
 }
 
 // ---------- 全屏 ----------
@@ -241,8 +291,33 @@ function onRouteChange(state) {
   if (!state.count) routeActive.value = -1
 }
 
-// 有路径时让出底部提示条：控制条已挪到左下角，二者不再抢同一块地
-const hasRoute = computed(() => !!(routeState.value && routeState.value.count))
+// 面板一旦出现就占住左下角，底部提示条要让位（哪怕当前没有选中任何路径）
+const hasRoute = computed(() => !!(routeState.value && routeState.value.paths && routeState.value.paths.length))
+
+// ---------- 名称立体显示 ----------
+
+/** 从地图同步名称层状态（换层级后标签会重建，可见性与数量都要跟着更新） */
+function syncNames() {
+  if (!map) return
+  namesOn.value = map.namesVisible
+  nameCount.value = map.nameCount
+}
+
+function onToggleNames() {
+  if (!map) return
+  const want = !namesOn.value
+  const on = map.setNamesVisible(want)
+  namesOn.value = on
+  nameCount.value = map.nameCount
+  namesWanted = on
+  try {
+    localStorage.setItem(NAMES_KEY, on ? '1' : '0')
+  } catch (e) {
+    /* 隐私模式下不可写，忽略 */
+  }
+  // 想开却没开成 = 本层没有可用的名称锚点，要明确告知而不是静默无反应
+  if (want && !on) showTownHint('当前层级没有可显示的名称')
+}
 
 onMounted(async () => {
   // 全屏监听/快捷键必须先挂：地图初始化或首屏数据失败时也不能把 UI 控制一起拖垮
@@ -264,9 +339,14 @@ onMounted(async () => {
       },
       onBreadcrumb: (names) => {
         breadcrumb.value = names
+        // 换层级会重建名称标签，开关状态与数量要同步回 UI
+        syncNames()
       },
       onTownEmpty: (name) => {
-        showTownHint(name)
+        showTownEmptyHint(name)
+      },
+      onLevelHint: (text) => {
+        showTownHint(text)
       },
       onTownInfo: (info) => {
         townSource.value = info && info.sources
@@ -278,7 +358,7 @@ onMounted(async () => {
         if (!result) return
         if (result.added) {
           routeActive.value = result.index
-          if (state.count >= 2) showRouteHint(`已连成 ${state.count} 点路径，点「巡航」沿管道跟拍`)
+          if (state.count >= 2) showRouteHint(`当前路径已 ${state.count} 点，点「巡航」沿管道跟拍`)
         } else {
           showRouteHint(`「${state.stops[result.index] && state.stops[result.index].name}」${result.reason}，未重复追加`)
         }
@@ -286,6 +366,11 @@ onMounted(async () => {
     })
     await map.load('100000')
     mapReady.value = true
+    // 调试出口：控制台里可直接操作地图实例做自动化验证与排障，不参与任何界面逻辑
+    window.__map = map
+    // 上次开着名称显示就恢复（下钻后由地图内部沿用同一开关状态）
+    if (namesWanted) map.setNamesVisible(true)
+    syncNames()
   } catch (e) {
     // 例如浏览器/驱动不支持 WebGL：给出提示而不是留一块黑屏
     console.error('[maps-dashboard] 地图初始化失败', e)
@@ -311,16 +396,20 @@ function onRouteToggle() {
   if (!map) return
   if (map.cruising) {
     map.stopCruise()
+  } else if (routeState.value && routeState.value.activeIndex < 0) {
+    showRouteHint('先点选一条路径（或点「＋」新建），再单击地图连线')
   } else if (!map.startCruise()) {
     showRouteHint('至少需要 2 个路径点才能巡航')
   }
   routeState.value = map.routeState()
 }
 function onRouteClear() {
-  if (map) map.clearRoute()
+  if (!map) return
+  if (!map.clearRoute()) showRouteHint('先点选一条路径再清空')
 }
 function onRouteUndo() {
-  if (map) map.removeLastStop()
+  if (!map) return
+  if (!map.removeLastStop()) showRouteHint('当前路径没有可撤销的点')
 }
 function onRouteSpeed(v) {
   if (map) map.setCruiseSpeed(v)
@@ -328,6 +417,33 @@ function onRouteSpeed(v) {
 function onRouteFocus(i) {
   routeActive.value = i
   if (map) map.focusRouteStop(i)
+}
+
+// ---------- 多条路径 ----------
+function onRouteNew() {
+  if (!map) return
+  map.newRoute()
+  routeState.value = map.routeState()
+  showRouteHint('已新建路径：依次单击区域即可连线，省 / 市 / 区县 / 乡镇都可以作为路径点')
+}
+function onRouteSelect(i) {
+  if (!map) return
+  map.selectRoute(i)
+  routeState.value = map.routeState()
+}
+function onRouteRemove(i) {
+  if (!map) return
+  map.removeRoute(i)
+  routeState.value = map.routeState()
+}
+function onRouteToggleAll() {
+  if (!map) return
+  if (map.cruiseAll) {
+    map.stopCruise()
+  } else if (!map.startCruiseAll()) {
+    showRouteHint('至少需要一条含 2 个点的路径')
+  }
+  routeState.value = map.routeState()
 }
 
 function onCrumb(i) {

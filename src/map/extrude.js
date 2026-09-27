@@ -313,6 +313,8 @@ export function createTownMap(geojson, projection, W, DEPTH, townDepth, themeNam
     featureGroup.userData.baseColor = baseColor
     featureGroup.userData.borderMat = borderMat
     featureGroup.userData.centerWorld = centerWorld
+    // 存下经纬度：换视图重投影时靠它把乡镇路径点重新落位
+    featureGroup.userData.lngLat = c || null
     group.add(featureGroup)
     featureGroups.push(featureGroup)
   })

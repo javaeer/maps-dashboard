@@ -50,6 +50,21 @@ const routeFragmentShader = /* glsl */ `
 
 const STRIPE_LEN = 90   // 单条光带的物理长度（世界单位）
 
+// 多条路径的配色轮转表：序号 % 长度 决定颜色，保证相邻路径色差足够大
+export const ROUTE_COLORS = [
+  { label: '青', color: 0x22d3ee, glow: 0xa5f3fc, joint: 0x7dd3fc },
+  { label: '橙', color: 0xfb923c, glow: 0xfed7aa, joint: 0xfdba74 },
+  { label: '紫', color: 0xa78bfa, glow: 0xddd6fe, joint: 0xc4b5fd },
+  { label: '绿', color: 0x34d399, glow: 0xa7f3d0, joint: 0x6ee7b7 },
+  { label: '粉', color: 0xf472b6, glow: 0xfbcfe8, joint: 0xf9a8d4 },
+  { label: '黄', color: 0xfacc15, glow: 0xfef08a, joint: 0xfde047 }
+]
+
+/** 按序号取一套配色（超出表长则轮转） */
+export function routeColorAt(i) {
+  return ROUTE_COLORS[((i % ROUTE_COLORS.length) + ROUTE_COLORS.length) % ROUTE_COLORS.length]
+}
+
 /**
  * 段曲线：对一条四点 CatmullRom 取 [1/3, 2/3] 子区间（即 c1 → c2）。
  * 直接映射原始曲线而非重采样成新曲线——重采样会在接缝处引入几度的切线偏差，
@@ -110,17 +125,21 @@ export class RoutePath {
     lift = 58,
     color = 0x22d3ee,
     glow = 0xa5f3fc,
-    joint = 0x7dd3fc
+    joint = 0x7dd3fc,
+    name = ''
   } = {}) {
     this.scene = scene
     this.radius = radius
     this.lift = lift
+    this.name = name
     this.color = new THREE.Color(color)
     this.glow = new THREE.Color(glow)
     this.jointColor = new THREE.Color(joint)
 
+    // points 是「当前投影下」的世界坐标；stops 保存的是地理定位（经纬度 + 层级）。
+    // 下钻 / 返回会换投影，届时用 stops 重算 points，路径才能跨层级继续存在。
     this.points = []      // 世界坐标路径点（含抬升）
-    this.stops = []       // 每个点的元信息 { name, adcode }
+    this.stops = []       // 每个点的元信息 { name, adcode, level, lngLat }
     this.segments = []    // 管段 { curve, mesh, geo, mat, length }
     this.joints = []      // 关节球 + 序号标签
     this.spline = null    // 全局巡航曲线（弧长参数化）
@@ -143,8 +162,9 @@ export class RoutePath {
 
   /**
    * 追加一个路径点。
-   * @param {THREE.Vector3} center 乡镇中心世界坐标
-   * @param {object} meta  { name, adcode }
+   * @param {THREE.Vector3} center 要素中心的世界坐标
+   * @param {object} meta  { name, adcode, level, lngLat }
+   *                       lngLat 为 [经度, 纬度]，投影变化后据此重算世界坐标
    * @returns {{added:boolean, index:number, reason?:string}}
    */
   addPoint(center, meta = {}) {
@@ -154,7 +174,12 @@ export class RoutePath {
     const p = center.clone()
     p.y += this.lift
     this.points.push(p)
-    this.stops.push({ name: meta.name || '', adcode: meta.adcode || null })
+    this.stops.push({
+      name: meta.name || '',
+      adcode: meta.adcode != null ? String(meta.adcode) : null,
+      level: meta.level || '',
+      lngLat: meta.lngLat || null
+    })
     this._addJoint(p, this.points.length)
 
     if (this.points.length >= 2) {
@@ -255,8 +280,11 @@ export class RoutePath {
     g.add(ball)
     g.add(label)
     this.group.add(g)
+    // 记下 ball / label：重投影后要同步挪动它们（二者用的是绝对世界坐标）
     this.joints.push({
       group: g,
+      ball,
+      label,
       dispose() {
         geo.dispose()
         mat.dispose()
@@ -264,6 +292,65 @@ export class RoutePath {
         label.material.dispose()
       }
     })
+  }
+
+  /** 重建全部管段（投影变化时调用：所有点的世界坐标都变了） */
+  _rebuildAllSegments() {
+    for (const s of this.segments) {
+      this.group.remove(s.mesh)
+      s.geo.dispose()
+      s.mat.dispose()
+    }
+    this.segments = []
+    for (let i = 0; i + 1 < this.points.length; i++) this._rebuildSegment(i)
+  }
+
+  /**
+   * 投影变化后重算全部路径点的世界坐标。
+   * 关键约束：只要有一个点定位失败就整条路径原样保留（不重投影），
+   * 避免 points 与 stops 索引错位导致管道连错地方。
+   * @param {(stop:{name,adcode,level,lngLat}) => THREE.Vector3|null} mapFn 地理定位 → 世界坐标
+   * @returns {{ok:boolean, reason?:string}}
+   */
+  reproject(mapFn) {
+    if (!this.stops.length || typeof mapFn !== 'function') return { ok: true }
+    const next = []
+    for (const s of this.stops) {
+      const w = mapFn(s)
+      if (!w) return { ok: false, reason: `「${s.name || s.adcode || '未命名'}」在当前视图中无法定位` }
+      next.push(w)
+    }
+    for (let i = 0; i < next.length; i++) {
+      const p = next[i].clone()
+      p.y += this.lift
+      this.points[i] = p
+      const j = this.joints[i]
+      if (j) {
+        j.ball.position.copy(p)
+        j.label.position.copy(p).add(new THREE.Vector3(0, this.radius * 4.2, 0))
+      }
+    }
+    this._rebuildAllSegments()
+    this._rebuildSpline()
+    return { ok: true }
+  }
+
+  /** 换配色（多条路径用不同颜色区分）；只改 uniform，不重建几何 */
+  setColors({ color, glow, joint } = {}) {
+    if (color != null) this.color.set(color)
+    if (glow != null) this.glow.set(glow)
+    if (joint != null) this.jointColor.set(joint)
+    for (const s of this.segments) {
+      s.mat.uniforms.uColor.value.copy(this.color)
+      s.mat.uniforms.uGlow.value.copy(this.glow)
+    }
+    for (const j of this.joints) {
+      if (j.ball) j.ball.material.color.copy(this.jointColor)
+    }
+  }
+
+  setVisible(v) {
+    this.group.visible = !!v
   }
 
   _rebuildSegment(i) {

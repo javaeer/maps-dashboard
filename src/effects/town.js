@@ -231,5 +231,8 @@ export function createTownMarker(town, projection, W, depth) {
   g.userData.town = town
   g.userData.dot = dot
   g.userData.label = label
+  // 供名称层与路径重投影使用：回退点位没有真实边界，中心即其世界坐标
+  g.userData.centerWorld = world.clone()
+  g.userData.lngLat = [town.lng, town.lat]
   return g
 }
