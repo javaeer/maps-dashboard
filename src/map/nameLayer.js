@@ -58,8 +58,9 @@ function roundRectPath(g, x, y, w, h, r) {
 /**
  * 名称标牌纹理：深色半透明底板 + 亮色描边 + 白色文字，保证压在任何底色上都可读。
  * 底板下沿画一个小三角，视觉上"钉"在光柱顶端。
+ * 纸质主题（兵要地志）换成「纸底墨框 + 宋体墨字」：不再发光，像盖在图上的人工标注。
  */
-function plateTexture(text) {
+function plateTexture(text, paper) {
   const padX = 36
   const w = Math.max(210, Math.ceil(text.length) * FONT_PX + padX * 2)
   const h = 108
@@ -69,6 +70,47 @@ function plateTexture(text) {
   c.width = w
   c.height = h + tail
   const g = c.getContext('2d')
+
+  if (paper) {
+    // 纸压在图上：只有极淡的压痕阴影，不能有光晕
+    g.shadowColor = 'rgba(70, 52, 30, 0.30)'
+    g.shadowBlur = 6
+    g.shadowOffsetY = 2
+    roundRectPath(g, 6, 6, w - 12, h - 12, 4)
+    g.fillStyle = 'rgba(253, 247, 230, 0.96)'
+    g.fill()
+    g.shadowColor = 'transparent'
+    g.shadowBlur = 0
+    g.shadowOffsetY = 0
+
+    // 小箭头（指向光柱顶）
+    g.beginPath()
+    g.moveTo(w / 2 - 12, h - 10)
+    g.lineTo(w / 2 + 12, h - 10)
+    g.lineTo(w / 2, h + tail - 6)
+    g.closePath()
+    g.fillStyle = 'rgba(253, 247, 230, 0.96)'
+    g.fill()
+
+    // 墨框：双线（外粗内细）接近手工描边的味道
+    roundRectPath(g, 6, 6, w - 12, h - 12, 4)
+    g.lineWidth = 4
+    g.strokeStyle = 'rgba(43, 43, 40, 0.92)'
+    g.stroke()
+    roundRectPath(g, 16, 16, w - 32, h - 32, 3)
+    g.lineWidth = 1.5
+    g.strokeStyle = 'rgba(43, 43, 40, 0.45)'
+    g.stroke()
+
+    g.font = `600 ${FONT_PX}px "Songti SC", "STSong", "SimSun", "Noto Serif CJK SC", serif`
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.fillStyle = '#2b2b28'
+    g.fillText(text, w / 2, h / 2 + 2)
+    const tex = new THREE.CanvasTexture(c)
+    tex.anisotropy = 4
+    return { tex, w: c.width, h: c.height, tail }
+  }
 
   // 外发光：先画一层模糊描边，让标牌在亮色板块上也能"浮"起来
   g.shadowColor = 'rgba(8, 20, 38, 0.9)'
@@ -111,8 +153,10 @@ function plateTexture(text) {
 }
 
 export class NameLayer {
-  constructor({ scene } = {}) {
+  constructor({ scene, paper = null } = {}) {
     this.scene = scene
+    // 纸质主题：标牌、光点、光柱全部换成墨/朱砂那一套
+    this.paper = paper
     this.group = new THREE.Group()
     this.group.renderOrder = 12
     // 标签是装饰物，默认隐藏；由 setVisible 显式打开
@@ -151,7 +195,7 @@ export class NameLayer {
   }
 
   _add(text, world) {
-    const { tex, w, h, tail } = plateTexture(text)
+    const { tex, w, h, tail } = plateTexture(text, this.paper)
 
     const sprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -170,13 +214,15 @@ export class NameLayer {
     // 标牌浮在要素上方，若参与射线检测会先于板块被命中，导致点击落到标签上而选不中区域
     sprite.raycast = () => {}
 
+    // 光点：纸质主题下当作「要地朱砂点」，不再用加色混合（加色在纸底上会发白）
     const dot = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: dotTexture(),
+        color: this.paper ? this.paper.cinnabar : 0xffffff,
         transparent: true,
-        opacity: 0.9,
+        opacity: this.paper ? 0.95 : 0.9,
         depthWrite: false,
-        blending: THREE.AdditiveBlending
+        blending: this.paper ? THREE.NormalBlending : THREE.AdditiveBlending
       })
     )
     dot.scale.set(DOT_R, DOT_R, 1)
@@ -190,10 +236,10 @@ export class NameLayer {
     const pole = new THREE.Line(
       poleGeo,
       new THREE.LineBasicMaterial({
-        color: 0x7dd3fc,
+        color: this.paper ? this.paper.ink : 0x7dd3fc,
         transparent: true,
-        opacity: 0.55,
-        blending: THREE.AdditiveBlending,
+        opacity: this.paper ? 0.8 : 0.55,
+        blending: this.paper ? THREE.NormalBlending : THREE.AdditiveBlending,
         depthWrite: false
       })
     )

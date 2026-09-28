@@ -35,6 +35,27 @@ export const THEMES = {
     townGlow: 0xffe8c0,
     border: 0xffdcbc,
     townBorder: 0xfff0d8
+  },
+  // 兵要地志：民国作战要图 / 兵要地志图的气质——宣纸底、墨线勾边、朱砂标要地。
+  // 色域刻意压到土黄—赭石，靠墨线而非辉光区分区域：这套语言里"发光"是穿帮的。
+  campaign: {
+    label: '兵要地志',
+    county: { h0: 26, h1: 54, sat: 0.3, lit: 0.62 },
+    town: { h0: 28, h1: 58, sat: 0.34, lit: 0.57 },
+    countyGlow: 0x8a6a3c,
+    townGlow: 0x6d5230,
+    border: 0x2b2b28,
+    townBorder: 0x3a3a35,
+    paper: {
+      bg: 0xf3e6c8,        // 宣纸底
+      ink: 0x2b2b28,       // 墨色：边界、文字
+      cinnabar: 0xa83232,  // 朱砂：兵锋线、要地标注
+      indigo: 0x2f4858,    // 靛青：水系一类次要要素
+      grid: 0xa89468,      // 计里画方网格
+      bloom: 0.06,         // 泛光几乎关掉：纸不发光
+      plate: 'paper',      // 标牌走墨框纸底那一套
+      arrows: true         // 路径画成带箭头的兵锋线
+    }
   }
 }
 
@@ -42,6 +63,14 @@ export const DEFAULT_THEME = 'aurora'
 
 export function getTheme(name) {
   return THEMES[name] || THEMES[DEFAULT_THEME]
+}
+
+/**
+ * 取主题的「纸感」配置。只有兵要地志这类纸质主题才有，其余主题返回 null，
+ * 调用方据此决定是否切到宣纸 / 墨线那一套表现。
+ */
+export function themePaper(name) {
+  return getTheme(name).paper || null
 }
 
 // 读取当前主题：优先 URL 参数 ?palette=tech|aurora|sunset，便于现场切换演示

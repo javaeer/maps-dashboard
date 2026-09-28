@@ -25,14 +25,18 @@
             v-for="p in state.paths" :key="p.index"
             class="path" :class="{ active: p.index === state.activeIndex }"
             :style="{ '--pc': p.color }"
-            :title="`${p.name}：${p.count} 点 · ${p.lengthText}`"
-            @click="$emit('select-route', p.index)"
+            :title="
+              p.index === state.activeIndex
+                ? `${p.name}：${p.count} 点 · ${p.lengthText}（点击取消选中）`
+                : `${p.name}：${p.count} 点 · ${p.lengthText}（点击选中并继续连线）`
+            "
+            @click="onPathClick(p)"
           >
             <i></i>
             <em>{{ p.name }}</em>
             <b>{{ p.count }}</b>
+            <!-- 最后一条也要能删：否则清空完还留着一条删不掉的路径占位 -->
             <button
-              v-if="state.paths.length > 1"
               class="del" title="删除这条路径"
               @click.stop="$emit('remove-route', p.index)"
             >×</button>
@@ -51,6 +55,13 @@
         <div class="ops">
           <button class="btn wide" :disabled="cruisable < 1" @click="$emit('toggle-all')">
             {{ state.cruiseAll ? '停止全部巡航' : `全部巡航（${cruisable} 条）` }}
+          </button>
+        </div>
+
+        <!-- 选中就想退出连线：否则一旦选中就再也回不到「单击只看信息」 -->
+        <div v-if="state.activeIndex >= 0" class="ops">
+          <button class="btn wide ghost" title="取消选中后，单击地图只看信息，不再往这条路线上加点（快捷键 Esc）" @click="$emit('deselect')">
+            取消选中（Esc）
           </button>
         </div>
 
@@ -88,7 +99,17 @@ const props = defineProps({
   active: { type: Number, default: -1 },
   hint: { type: String, default: '' }
 })
-defineEmits(['toggle', 'toggle-all', 'clear', 'undo', 'speed', 'focus', 'new-route', 'select-route', 'remove-route'])
+const emit = defineEmits(['toggle', 'toggle-all', 'clear', 'undo', 'speed', 'focus', 'new-route', 'select-route', 'remove-route', 'deselect', 'collapse'])
+
+// 点胶囊 = 切换选中：已选中的那条再点一次就是取消，避免「选中了退不回去」
+function onPathClick(p) {
+  if (!props.state) return
+  if (p.index === props.state.activeIndex) {
+    emit('deselect')
+  } else {
+    emit('select-route', p.index)
+  }
+}
 
 // 可巡航（≥2 点）的路径条数：决定「全部巡航」按钮是否可用
 const cruisable = computed(() => {
@@ -115,6 +136,8 @@ const collapsed = ref(false)
 
 function toggle() {
   collapsed.value = !collapsed.value
+  // 折叠后面板只剩一条窄胶囊，底部那条操作提示要让回来
+  emit('collapse', collapsed.value)
   try {
     localStorage.setItem(KEY, collapsed.value ? '1' : '0')
   } catch (e) {
@@ -128,6 +151,7 @@ onMounted(() => {
   } catch (e) {
     /* 忽略 */
   }
+  emit('collapse', collapsed.value)
 })
 </script>
 
@@ -327,6 +351,15 @@ onMounted(() => {
   background: rgba(167, 139, 250, 0.16);
   border-color: rgba(167, 139, 250, 0.42);
   color: #ddd6fe;
+}
+/* 中性色：退出连线这类「收手」操作不该用强调色 */
+.btn.ghost {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--text-1);
+}
+.btn.ghost:hover:not(:disabled) {
+  color: var(--text-0);
 }
 .speed {
   display: flex;

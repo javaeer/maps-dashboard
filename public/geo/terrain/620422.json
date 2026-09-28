@@ -1,0 +1,34 @@
+{
+ "bbox": [
+  104.238281,
+  36.456636,
+  105.996094,
+  35.317366
+ ],
+ "size": [
+  1200,
+  1200
+ ],
+ "zoom": 11,
+ "label": "会宁县",
+ "elevRange": [
+  1529.0,
+  2396.0
+ ],
+ "peaks": [
+  {
+   "lng": 105.97264,
+   "lat": 36.37967,
+   "ele": 1966,
+   "prom": 204
+  },
+  {
+   "lng": 105.01969,
+   "lat": 36.04616,
+   "ele": 1930,
+   "prom": 189
+  }
+ ],
+ "source": "AWS Terrain Tiles (terrarium) — 源自 SRTM / GMTED2010 / NED 等公开高程数据",
+ "tileUrl": "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/11/*/*.png"
+}

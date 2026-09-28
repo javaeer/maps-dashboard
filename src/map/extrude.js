@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { geoMercator } from 'd3-geo'
-import { getTheme, themeColor } from './palette.js'
+import { getTheme, themeColor, themePaper } from './palette.js'
 
 // 侧面扫光 Shader（借鉴 threemap 方案）：沿拉伸高度方向做一条循环流动的亮带
 const sideVertexShader = /* glsl */ `
@@ -15,11 +15,21 @@ const sideFragmentShader = /* glsl */ `
   uniform float uDepth;
   uniform vec3 uColor;
   uniform vec3 uGlow;
+  uniform float uPaper;
   varying vec2 vUv;
   void main() {
     // 注意：ExtrudeGeometry 侧面 UV 的 v 分量是 1 - z（z 跨 0..depth 的实际数值），
     // 必须先按 uDepth 归一化到 0~1，否则 fract 会把扫光带切成 depth 条细纹（摩尔纹）
     float h = vUv.y / uDepth;
+    // 纸质主题：侧面是「墨色分层的土坡」——越靠上越受光、底部压成墨色，
+    // 再叠一层极细的竖纹当纸纤维。不做流动光带：纸上没有会跑的光。
+    if (uPaper > 0.5) {
+      float shade = mix(0.40, 1.0, pow(clamp(h, 0.0, 1.0), 0.8));
+      float fiber = 0.95 + 0.05 * fract(vUv.x * 240.0);
+      float wash = 0.92 + 0.08 * fract(h * 18.0);
+      gl_FragColor = vec4(uColor * shade * fiber * wash, 1.0);
+      return;
+    }
     float t = fract(h - uTime * 0.18);
     float band = exp(-pow((t - 0.5) * 9.0, 2.0));
     vec3 col = mix(uColor, uGlow, band);
@@ -122,6 +132,7 @@ export function createExtrudedMap(geojson, opts = {}) {
   const H = opts.height || 1024
   const depth = opts.depth || 70
   const theme = getTheme(opts.theme)
+  const paper = themePaper(opts.theme)
 
   const projection = createFittedProjection(geojson, W, H)
 
@@ -143,9 +154,10 @@ export function createExtrudedMap(geojson, opts = {}) {
 
     const capMat = new THREE.MeshStandardMaterial({
       color: baseColor,
-      emissive: baseColor.clone().multiplyScalar(0.18),
-      metalness: 0.2,
-      roughness: 0.55
+      // 纸面上几乎不自发光，靠光照出层次；金属度归零，否则会反出塑料高光
+      emissive: baseColor.clone().multiplyScalar(paper ? 0.04 : 0.18),
+      metalness: paper ? 0 : 0.2,
+      roughness: paper ? 0.92 : 0.55
       // 不使用透明：半透明顶盖会让内部所有侧面亮墙透出，形成噪点
     })
 
@@ -154,19 +166,21 @@ export function createExtrudedMap(geojson, opts = {}) {
         uTime: { value: 0 },
         uDepth: { value: depth },
         uColor: { value: baseColor.clone() },
-        uGlow: { value: new THREE.Color(theme.countyGlow) }
+        uGlow: { value: new THREE.Color(theme.countyGlow) },
+        uPaper: { value: paper ? 1 : 0 }
       },
       vertexShader: sideVertexShader,
       fragmentShader: sideFragmentShader
     })
     sideMaterials.push(sideMat)
 
-    // 顶面发光描边（共享材质，加色混合形成锐利边线）
+    // 顶面描边：加色混合能在深色底上烧出发光边线，但在米黄纸底上会把墨线冲成白线，
+    // 所以纸质主题必须退回普通混合，颜色也换成墨色。
     const borderMat = new THREE.LineBasicMaterial({
       color: theme.border,
       transparent: true,
-      opacity: 0.9,
-      blending: THREE.AdditiveBlending,
+      opacity: paper ? 0.95 : 0.9,
+      blending: paper ? THREE.NormalBlending : THREE.AdditiveBlending,
       depthWrite: false
     })
 
@@ -219,6 +233,7 @@ export function createExtrudedMap(geojson, opts = {}) {
 // 整体贴在县顶面（group.position.y = DEPTH）之上，形成可点击的乡镇拼图
 export function createTownMap(geojson, projection, W, DEPTH, townDepth, themeName) {
   const theme = getTheme(themeName)
+  const paper = themePaper(themeName)
   const H = W
   const group = new THREE.Group()
   group.rotation.x = -Math.PI / 2
@@ -253,9 +268,9 @@ export function createTownMap(geojson, projection, W, DEPTH, townDepth, themeNam
 
     const capMat = new THREE.MeshStandardMaterial({
       color: baseColor,
-      emissive: baseColor.clone().multiplyScalar(0.16),
-      metalness: 0.2,
-      roughness: 0.6
+      emissive: baseColor.clone().multiplyScalar(paper ? 0.04 : 0.16),
+      metalness: paper ? 0 : 0.2,
+      roughness: paper ? 0.92 : 0.6
     })
 
     const sideMat = new THREE.ShaderMaterial({
@@ -263,7 +278,8 @@ export function createTownMap(geojson, projection, W, DEPTH, townDepth, themeNam
         uTime: { value: 0 },
         uDepth: { value: townDepth },
         uColor: { value: baseColor.clone() },
-        uGlow: { value: new THREE.Color(theme.townGlow) }
+        uGlow: { value: new THREE.Color(theme.townGlow) },
+        uPaper: { value: paper ? 1 : 0 }
       },
       vertexShader: sideVertexShader,
       fragmentShader: sideFragmentShader
@@ -273,8 +289,8 @@ export function createTownMap(geojson, projection, W, DEPTH, townDepth, themeNam
     const borderMat = new THREE.LineBasicMaterial({
       color: theme.townBorder,
       transparent: true,
-      opacity: 0.85,
-      blending: THREE.AdditiveBlending,
+      opacity: paper ? 0.95 : 0.85,
+      blending: paper ? THREE.NormalBlending : THREE.AdditiveBlending,
       depthWrite: false
     })
 

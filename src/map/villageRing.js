@@ -37,8 +37,14 @@ function roundRectPath(g, x, y, w, h, r) {
   g.closePath()
 }
 
+// 纸质主题（兵要地志）下的名录牌配色：村 = 墨字纸底，社区 = 朱砂字纸底，
+// 语义仍靠颜色区分，只是换成"墨与朱"而不是荧光绿紫。
+const PAPER_FONT = '"Songti SC", "STSong", "SimSun", "Noto Serif CJK SC", serif'
+const PAPER_BG = 'rgba(253, 247, 230, 0.96)'
+const PAPER_BG_ALT = 'rgba(250, 238, 210, 0.96)'
+
 /** 单块名录标牌纹理 */
-function chipTexture(text, kind) {
+function chipTexture(text, kind, paper) {
   const padX = 22
   const w = Math.max(120, Math.ceil(text.length) * FONT_PX + padX * 2)
   const h = PLATE_H
@@ -48,25 +54,31 @@ function chipTexture(text, kind) {
   c.height = h
   const g = c.getContext('2d')
 
-  g.shadowColor = 'rgba(4, 12, 24, 0.85)'
-  g.shadowBlur = 10
+  g.shadowColor = paper ? 'rgba(70, 52, 30, 0.28)' : 'rgba(4, 12, 24, 0.85)'
+  g.shadowBlur = paper ? 6 : 10
   g.shadowOffsetY = 2
-  roundRectPath(g, 6, 6, w - 12, h - 12, 14)
-  g.fillStyle = kind === 'community' ? COMMUNITY_BG : VILLAGE_BG
+  roundRectPath(g, 6, 6, w - 12, h - 12, paper ? 4 : 14)
+  g.fillStyle = paper
+    ? (kind === 'community' ? PAPER_BG_ALT : PAPER_BG)
+    : (kind === 'community' ? COMMUNITY_BG : VILLAGE_BG)
   g.fill()
   g.shadowColor = 'transparent'
   g.shadowBlur = 0
   g.shadowOffsetY = 0
 
-  roundRectPath(g, 6, 6, w - 12, h - 12, 14)
-  g.strokeStyle = kind === 'community' ? COMMUNITY_EDGE : VILLAGE_EDGE
-  g.lineWidth = 2
+  roundRectPath(g, 6, 6, w - 12, h - 12, paper ? 4 : 14)
+  g.strokeStyle = paper
+    ? (kind === 'community' ? 'rgba(168, 50, 50, 0.55)' : 'rgba(43, 43, 40, 0.5)')
+    : (kind === 'community' ? COMMUNITY_EDGE : VILLAGE_EDGE)
+  g.lineWidth = paper ? 2.5 : 2
   g.stroke()
 
-  g.font = `600 ${FONT_PX}px "PingFang SC", "Microsoft YaHei", sans-serif`
+  g.font = `600 ${FONT_PX}px ${paper ? PAPER_FONT : '"PingFang SC", "Microsoft YaHei", sans-serif'}`
   g.textAlign = 'center'
   g.textBaseline = 'middle'
-  g.fillStyle = kind === 'community' ? COMMUNITY_COLOR : VILLAGE_COLOR
+  g.fillStyle = paper
+    ? (kind === 'community' ? '#a83232' : '#2b2b28')
+    : (kind === 'community' ? COMMUNITY_COLOR : VILLAGE_COLOR)
   g.fillText(text, w / 2, h / 2 + 1)
 
   const tex = new THREE.CanvasTexture(c)
@@ -78,7 +90,7 @@ function chipTexture(text, kind) {
  * 中心说明牌：镇名 + 数量 + 口径声明。
  * 口径声明必须写进去——村级没有坐标，画面上看到的只是名录，不能让人以为那是地理位置。
  */
-function noteTexture(title, villageCount, communityCount) {
+function noteTexture(title, villageCount, communityCount, paper) {
   const lines = [title, `${villageCount} 个行政村 · ${communityCount} 个社区`, '村级暂无坐标数据，按名录展示']
   const padX = 44
   const fs = [46, 30, 24]
@@ -90,26 +102,28 @@ function noteTexture(title, villageCount, communityCount) {
   c.height = h
   const g = c.getContext('2d')
 
-  g.shadowColor = 'rgba(4, 12, 24, 0.9)'
-  g.shadowBlur = 18
+  g.shadowColor = paper ? 'rgba(70, 52, 30, 0.3)' : 'rgba(4, 12, 24, 0.9)'
+  g.shadowBlur = paper ? 8 : 18
   g.shadowOffsetY = 4
-  roundRectPath(g, 10, 10, w - 20, h - 20, 26)
-  g.fillStyle = 'rgba(9, 22, 42, 0.9)'
+  roundRectPath(g, 10, 10, w - 20, h - 20, paper ? 6 : 26)
+  g.fillStyle = paper ? 'rgba(253, 247, 230, 0.97)' : 'rgba(9, 22, 42, 0.9)'
   g.fill()
   g.shadowColor = 'transparent'
   g.shadowBlur = 0
   g.shadowOffsetY = 0
 
-  roundRectPath(g, 10, 10, w - 20, h - 20, 26)
-  g.strokeStyle = 'rgba(56, 189, 248, 0.5)'
-  g.lineWidth = 2.5
+  roundRectPath(g, 10, 10, w - 20, h - 20, paper ? 6 : 26)
+  g.strokeStyle = paper ? 'rgba(43, 43, 40, 0.85)' : 'rgba(56, 189, 248, 0.5)'
+  g.lineWidth = paper ? 4 : 2.5
   g.stroke()
 
   g.textAlign = 'center'
   g.textBaseline = 'middle'
-  const colors = ['#e0f2fe', '#7dd3fc', '#94a3b8']
+  const colors = paper ? ['#2b2b28', '#3f3a2e', '#6b6152'] : ['#e0f2fe', '#7dd3fc', '#94a3b8']
   lines.forEach((line, i) => {
-    g.font = `${i === 0 ? 700 : 500} ${fs[i]}px "PingFang SC", "Microsoft YaHei", sans-serif`
+    g.font = `${i === 0 ? 700 : 500} ${fs[i]}px ${
+      paper ? PAPER_FONT : '"PingFang SC", "Microsoft YaHei", sans-serif'
+    }`
     g.fillStyle = colors[i]
     g.fillText(line, w / 2, 48 + i * 58)
   })
@@ -149,7 +163,8 @@ export function createVillageRing({
   communities = [],
   title = '',
   radius = 300,
-  y = 200
+  y = 200,
+  paper = null
 } = {}) {
   const group = new THREE.Group()
   const disposables = []
@@ -160,7 +175,7 @@ export function createVillageRing({
   ]
 
   // 中心说明牌：即使名录为空也要显示，好让"这个镇没有村级名录"这件事被看见
-  const note = noteTexture(title || '下辖名录', villages.length, communities.length)
+  const note = noteTexture(title || '下辖名录', villages.length, communities.length, paper)
   const noteSprite = makeSprite(note.tex, note.w, note.h)
   noteSprite.position.set(0, y + 150, 0)
   noteSprite.scale.multiplyScalar(1.15)
@@ -181,7 +196,7 @@ export function createVillageRing({
     const R = radius + r * RING_GAP
     slice.forEach((it, i) => {
       const a = (i / slice.length) * Math.PI * 2 - Math.PI / 2
-      const { tex, w, h } = chipTexture(it.name, it.kind)
+      const { tex, w, h } = chipTexture(it.name, it.kind, paper)
       const s = makeSprite(tex, w, h)
       s.position.set(Math.cos(a) * R, y + r * 26, Math.sin(a) * R)
       group.add(s)

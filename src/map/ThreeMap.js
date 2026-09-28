@@ -9,8 +9,11 @@ import { createTownMarker, createTownLabel, geoToWorld } from '../effects/town.j
 import { RoutePath, routeColorAt } from '../effects/routePath.js'
 import { NameLayer } from './nameLayer.js'
 import { createVillageRing } from './villageRing.js'
-import { resolveTheme } from './palette.js'
+import { resolveTheme, themePaper } from './palette.js'
 import { findTownInfo, townToDisplay } from '../utils/townName.js'
+import { loadHydro, hydroUrls, createHydroLayer } from './hydroLayer.js'
+import { loadTerrain, createTerrainMesh, createPeakMarks } from './terrainLayer.js'
+import { createMilitaryLayer } from './militaryLayer.js'
 
 const MAP_W = 1024
 // 拉伸高度取地图宽度的 ~7%，避免区域变成"通天柱"
@@ -19,10 +22,14 @@ const DEPTH = 70
 const TOWN_DEPTH = 12
 
 export class ThreeMap {
-  constructor(container, { onSelect, onBreadcrumb, onSelectTown, onTownEmpty, onTownInfo, onRouteChange, onLevelHint } = {}) {
+  constructor(container, { onSelect, onBreadcrumb, onSelectTown, onTownEmpty, onTownInfo, onRouteChange, onLevelHint, onGeoChange, onMilitarySelect } = {}) {
     this.container = container
     this.onSelect = onSelect || (() => {})
     this.onTownInfo = onTownInfo || (() => {})
+    // 山系 / 水系加载完成后回传来源与要素数，供图注标注（事实必须可溯源）
+    this.onGeoChange = onGeoChange || (() => {})
+    // 点击地图上的军事要素（驻军 / 布防 / 行军路线）回传该要素，供详情区展示
+    this.onMilitarySelect = onMilitarySelect || (() => {})
     this.onRouteChange = onRouteChange || (() => {})
     this.onBreadcrumb = onBreadcrumb || (() => {})
     this.onSelectTown = onSelectTown || (() => {})
@@ -32,6 +39,23 @@ export class ThreeMap {
 
     this.adcodeStack = ['100000']
     this.nameMap = { 100000: '中国' }
+    // 当前视图的地理中心 [lng, lat]：图廓比例尺要用它换算「1 公里 ≈ 多少世界单位」，
+    // 纬度不同尺度差别很大，不能写死。下钻时随渲染要素更新。
+    this.viewCenter = [104.0, 35.0]
+    // 地形晕渲 / 水系图层（真实地理要素，不是装饰）
+    this.terrain = null       // { mesh, peaks } 由 createTerrainMesh / createPeakMarks 产出
+    this.hydroLayer = null    // { group, count, dispose }
+    this.geoSource = null     // 数据来源说明，交给 UI 做图注
+    // 山系 / 水系的用户开关（两者可分别关掉，关掉的图层不参与图注统计）
+    this.geoWant = { terrain: true, hydro: true }
+    // 单镇（村级）视图会临时收起地理图层与军事要素，退出时按用户开关恢复
+    this._geoHiddenByView = false
+    // 军事要素图层：由用户导入（驻军 / 布防 / 行军路线…），本仓库不内置任何史实条目
+    this.militaryFeatures = []
+    this.militaryLayer = null
+    this.militaryLabels = true
+    // 连续下钻时异步加载会互相踩，用令牌保证只落地最后一次
+    this._geoToken = 0
     this.mapGroup = null
     this.featureGroups = []
     this.sideMaterials = []
@@ -66,6 +90,11 @@ export class ThreeMap {
     this.cruiseLook = null
     this.unitsPerKm = null     // 当前县级投影下 1 公里 ≈ 多少世界单位（长度/速度换算用）
     this.clock = new THREE.Clock()
+    // 全部巡航会临时占用 routeIndex，记下「原本未选中」以便停下时还原
+    this._restoreNoSelection = false
+    // 拖拽判定：按下坐标，用于把「拖视角松手」和真正的单击区分开
+    this._downX = null
+    this._downY = null
     // 配色主题：支持 URL 参数 ?palette=tech|aurora|sunset 现场切换
     this.theme = resolveTheme()
     // 每帧渲染完成后的回调，供视频录制抓取画面；未设置时不产生任何开销
@@ -73,7 +102,7 @@ export class ThreeMap {
 
     this._init()
     // 名称立体标签层：开关打开后在当前层级的板块上显示名称（全国显示省名、省内显示市名…）
-    this.nameLayer = new NameLayer({ scene: this.scene })
+    this.nameLayer = new NameLayer({ scene: this.scene, paper: themePaper(this.theme) })
     this._bindEvents()
     this._tick = () => this._animate()
     requestAnimationFrame(this._tick)
@@ -82,9 +111,12 @@ export class ThreeMap {
   _init() {
     const w = this.container.clientWidth || window.innerWidth
     const h = this.container.clientHeight || window.innerHeight
+    // 纸质主题：整块画布换成宣纸底，雾也用纸色，远处才不会发灰发蓝
+    const paper = themePaper(this.theme)
 
     this.scene = new THREE.Scene()
-    this.scene.fog = new THREE.FogExp2(0x05080f, 0.00009)
+    if (paper) this.scene.background = new THREE.Color(paper.bg)
+    this.scene.fog = new THREE.FogExp2(paper ? paper.bg : 0x05080f, 0.00009)
 
     this.camera = new THREE.PerspectiveCamera(45, w / h, 1, 30000)
     this.camera.position.set(0, 1050, 1400)
@@ -106,19 +138,23 @@ export class ThreeMap {
     this.controls.autoRotate = true
     this.controls.autoRotateSpeed = 0.5
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.65))
-    const dir = new THREE.DirectionalLight(0x9fd8ff, 1.1)
+    // 纸面靠漫反射出层次：环境光要给足，主光改成暖白（冷蓝打在纸上会发脏）
+    this.scene.add(new THREE.AmbientLight(paper ? 0xfff6e2 : 0xffffff, paper ? 1.05 : 0.65))
+    const dir = new THREE.DirectionalLight(paper ? 0xfff2d8 : 0x9fd8ff, paper ? 0.85 : 1.1)
     dir.position.set(400, 900, 600)
     this.scene.add(dir)
-    const point = new THREE.PointLight(0x38bdf8, 0.9, 6000)
+    const point = new THREE.PointLight(paper ? 0xffd9a0 : 0x38bdf8, paper ? 0.35 : 0.9, 6000)
     point.position.set(0, 800, 0)
     this.scene.add(point)
 
-    const grid = new THREE.GridHelper(5000, 50, 0x1b3a5b, 0x0e2138)
+    // 网格：纸质主题下是「计里画方」的方格网，颜色换成淡墨赭，不能是荧光蓝
+    const grid = new THREE.GridHelper(5000, 50, paper ? paper.grid : 0x1b3a5b, paper ? paper.grid : 0x0e2138)
     grid.position.y = -12
+    if (paper) grid.material.opacity = 0.35
+    if (paper) grid.material.transparent = true
     this.scene.add(grid)
 
-    const { composer } = createComposer(this.renderer, this.scene, this.camera, w, h)
+    const { composer } = createComposer(this.renderer, this.scene, this.camera, w, h, paper)
     this.composer = composer
 
     this.raycaster = new THREE.Raycaster()
@@ -161,12 +197,196 @@ export class ThreeMap {
     this.featureGroups = built.featureGroups
     this.sideMaterials = built.sideMaterials
     this.projection = built.projection
+    // 取本层所有要素中心的中位数作为视图中心，供比例尺换算使用
+    const cs = geo.features
+      .map((f) => (f.properties || {}).center)
+      .filter((c) => Array.isArray(c) && c.length >= 2)
+    if (cs.length) {
+      const lng = cs.reduce((s, c) => s + c[0], 0) / cs.length
+      const lat = cs.reduce((s, c) => s + c[1], 0) / cs.length
+      this.viewCenter = [lng, lat]
+    }
     this.scene.add(this.mapGroup)
     // 本层渲染的就是「下一级行政区」（全国→省、省→市、市→区县），
     // 名称层直接取这批要素的 name，天然符合"进到哪一级就显示哪一级名称"
     this._rebuildNameLayer(built.featureGroups)
     // 投影换了：已有路径按经纬度重新落位，跨层级继续保留
     this._reprojectRoutes()
+    // 军事要素同样按经纬度重投影，换层级后继续留在正确的地理位置上
+    this._rebuildMilitary()
+    // 山系与水系依赖新投影，异步重建（不阻塞出图）
+    this._reloadGeoLayers()
+  }
+
+  // ---------- 山系（晕渲 / 山头）与水系 ----------
+
+  /** 当前层级该用哪份地形：优先精确匹配 adcode（县级用县、省级用省），没有就回退全国 */
+  _terrainKey() {
+    const ad = String(this.adcodeStack[this.adcodeStack.length - 1] || '100000')
+    if ((this.mode === 'town' || this.mode === 'village') && this.townAdcode) {
+      return String(this.townAdcode)
+    }
+    return ad === '100000' ? 'china' : ad
+  }
+
+  _clearTerrain() {
+    if (!this.terrain) return
+    if (this.terrain.mesh) {
+      this.scene.remove(this.terrain.mesh.mesh)
+      this.terrain.mesh.dispose()
+    }
+    if (this.terrain.peaks) {
+      this.scene.remove(this.terrain.peaks.group)
+      this.terrain.peaks.dispose()
+    }
+    this.terrain = null
+  }
+
+  _clearHydro() {
+    if (!this.hydroLayer) return
+    this.scene.remove(this.hydroLayer.group)
+    this.hydroLayer.dispose()
+    this.hydroLayer = null
+  }
+
+  /**
+   * 按「用户开关 ∩ 当前视图是否允许」重算山系 / 水系 / 军事要素的可见性。
+   * 分开两个维度是必要的：用户关掉山系后，进单镇视图再退回，不能把山系又打开。
+   */
+  _applyGeoVisibility() {
+    const byView = !this._geoHiddenByView
+    const tv = this.geoWant.terrain && byView
+    const hv = this.geoWant.hydro && byView
+    if (this.terrain) {
+      if (this.terrain.mesh) this.terrain.mesh.mesh.visible = tv
+      // 山头符号属于山系，跟着山系一起显隐
+      if (this.terrain.peaks) this.terrain.peaks.group.visible = tv
+    }
+    if (this.hydroLayer) this.hydroLayer.group.visible = hv
+    // 军事要素在单镇视图下会错位（该视图用的是镇自身重新拟合的投影），一并收起
+    if (this.militaryLayer) this.militaryLayer.group.visible = byView
+  }
+
+  /**
+   * 山系 / 水系的全局显示开关。
+   * @param {'terrain'|'hydro'} kind
+   * @param {boolean} v
+   * @returns {boolean} 实际生效的状态
+   */
+  setGeoVisible(kind, v) {
+    if (kind !== 'terrain' && kind !== 'hydro') return false
+    this.geoWant[kind] = !!v
+    this._applyGeoVisibility()
+    // 图注要跟着开关走：关掉的图层不该出现在来源说明里。
+    // 必须换一个新对象再回传——UI 侧拿到的是响应式引用，原地改属性不会触发重算
+    if (this.geoSource) {
+      this.geoSource = {
+        ...this.geoSource,
+        terrainOn: this.geoWant.terrain,
+        hydroOn: this.geoWant.hydro
+      }
+      this.onGeoChange(this.geoSource)
+    }
+    return this.geoWant[kind]
+  }
+
+  /** 单镇视图只留一块板块和名录环，地理图层与军事要素一并收起（退出时按用户开关恢复） */
+  _setGeoLayersVisible(v) {
+    this._geoHiddenByView = !v
+    this._applyGeoVisibility()
+  }
+
+  /**
+   * 重建山系 + 水系。
+   * 两者都由真实公开数据生成，缺数据（比如某县没有水系文件）就安静地不画，
+   * 绝不用合成线条糊弄——宁可少画，不画假的。
+   */
+  async _reloadGeoLayers(forceAdcode) {
+    const token = ++this._geoToken
+    const paper = themePaper(this.theme)
+    const key = forceAdcode ? String(forceAdcode) : this._terrainKey()
+    // 顶面之上一点点：晕渲是"地表"，要压在行政区划浮雕之上
+    const top = this.mode === 'town' || this.mode === 'village' ? DEPTH + TOWN_DEPTH + 1.6 : DEPTH + 1.6
+
+    // --- 山系 ---
+    let t = await loadTerrain(`geo/terrain/${key}`)
+    let terrainKey = key
+    if (!t) {
+      t = await loadTerrain('geo/terrain/china')
+      terrainKey = 'china'
+    }
+    if (token !== this._geoToken || !this.projection) return
+    this._clearTerrain()
+    const pieces = {}
+    if (t) {
+      const mesh = createTerrainMesh({
+        meta: t.meta,
+        tex: t.tex,
+        projection: this.projection,
+        W: MAP_W,
+        y: top,
+        // 纸质主题用赭石画山（墨分五色里的"赭"），电子主题压成冷灰蓝
+        color: paper ? 0x6b5a3c : 0x1d4a6b,
+        opacity: paper ? 0.92 : 0.5
+      })
+      this.scene.add(mesh.mesh)
+      pieces.mesh = mesh
+      // 山头符号：高程是实测值。县级（会宁这类黄土丘陵）取最显著的几个，
+      // 免得梁峁点糊成一片——少画可以，不画高度不存在的山。
+      const peaks = createPeakMarks({
+        peaks: t.meta.peaks || [],
+        projection: this.projection,
+        W: MAP_W,
+        y: top + 6,
+        size: MAP_W * 0.045,
+        limit: this.mode === 'region' ? 0 : 6
+      })
+      this.scene.add(peaks.group)
+      pieces.peaks = peaks
+      this.terrain = pieces
+    }
+
+    // --- 水系 ---
+    const adcode = forceAdcode || String(this.adcodeStack[this.adcodeStack.length - 1] || '100000')
+    const urls = hydroUrls(this.mode, adcode)
+    const cols = []
+    const sources = []
+    for (const u of urls) {
+      const d = await loadHydro(u)
+      if (!d) continue
+      cols.push(d)
+      const s = d.meta && d.meta.source
+      if (s && !sources.includes(s)) sources.push(s)
+    }
+    if (token !== this._geoToken || !this.projection) return
+    this._clearHydro()
+    if (cols.length) {
+      this.hydroLayer = createHydroLayer({
+        collections: cols,
+        projection: this.projection,
+        W: MAP_W,
+        y: top + 0.6,
+        // 靛青画水、墨线勾岸：旧舆图的水系就是这个配色
+        water: paper ? 0x2f4858 : 0x38bdf8,
+        ink: paper ? 0x2b2b28 : 0x9ffcff,
+        scale: this.mode === 'region' ? 1 : 0.7
+      })
+      this.scene.add(this.hydroLayer.group)
+    }
+
+    // 图层刚建好，立刻按用户开关决定可见性（否则关掉山系后下钻会自己亮出来）
+    this._applyGeoVisibility()
+    this.geoSource = {
+      hydro: sources.length ? sources : null,
+      terrain: t ? t.meta.source : null,
+      terrainLabel: t ? t.meta.label : null,
+      peaks: this.terrain && this.terrain.peaks ? this.terrain.peaks.count : 0,
+      rivers: this.hydroLayer ? this.hydroLayer.count.rivers : 0,
+      lakes: this.hydroLayer ? this.hydroLayer.count.lakes : 0,
+      terrainOn: this.geoWant.terrain,
+      hydroOn: this.geoWant.hydro
+    }
+    if (this.onGeoChange) this.onGeoChange(this.geoSource)
   }
 
   /** 重建名称标签；开关状态跨层级保持（全国看完省名，下钻后接着看市名） */
@@ -191,6 +411,54 @@ export class ThreeMap {
   /** 当前层级名称标签的数量，供 UI 提示「本层共 N 个名称」 */
   get nameCount() {
     return this.nameLayer ? this.nameLayer.count : 0
+  }
+
+  // ---------- 军事要素（导入） ----------
+  //
+  // 要素全部来自用户导入：本仓库不内置任何驻军 / 布防 / 行军路线条目——
+  // 军事态势随时代变化，没有"一份永远正确的底图"，画什么必须由数据说话。
+
+  /**
+   * 设置要显示的军事要素（已由 store 完成时期 / 类型过滤）。
+   * @param {Object[]} list
+   */
+  setMilitaryFeatures(list) {
+    this.militaryFeatures = Array.isArray(list) ? list : []
+    return this._rebuildMilitary()
+  }
+
+  /** 按当前投影重建军事要素图层（下钻换投影后必须重画，否则会错位） */
+  _rebuildMilitary() {
+    this._clearMilitary()
+    if (!this.projection || !this.militaryFeatures.length) return 0
+    const top = this.mode === 'town' || this.mode === 'village' ? DEPTH + TOWN_DEPTH + 1.6 : DEPTH + 1.6
+    this.militaryLayer = createMilitaryLayer({
+      features: this.militaryFeatures,
+      projection: this.projection,
+      W: MAP_W,
+      y: top + 4,
+      paper: themePaper(this.theme),
+      labels: this.militaryLabels,
+      // 军标是图面符号：按屏幕像素标定尺寸，符号 / 标牌在各级视图下观感一致
+      unitPerPx: this.unitPerPixel() || 1.75
+    })
+    this.scene.add(this.militaryLayer.group)
+    this._applyGeoVisibility()
+    return this.militaryLayer.count
+  }
+
+  _clearMilitary() {
+    if (!this.militaryLayer) return
+    this.scene.remove(this.militaryLayer.group)
+    this.militaryLayer.dispose()
+    this.militaryLayer = null
+  }
+
+  /** 军事要素的名称标注开关（符号与路线始终显示） */
+  setMilitaryLabels(v) {
+    this.militaryLabels = !!v
+    if (this.militaryLayer) this.militaryLayer.setLabels(this.militaryLabels)
+    return this.militaryLabels
   }
 
   // 下钻：先探测是否有下级面；有则渲染面，无（叶子区县）则进入镇点位视图
@@ -228,7 +496,7 @@ export class ThreeMap {
   async _enterTownView(feature, adcode) {
     // 进入县级默认不选中任何路径：上层连好的路线保留（跨层级继续用），
     // 但不再自动吃路径点；用户要继续连线必须在路径面板显式点选某条路径或新建。
-    if (this._clearRouteSelection()) {
+    if (this.clearRouteSelection()) {
       this.onLevelHint('已进入县级：路径取消选中（路线保留），单击乡镇只看信息；要继续连线请在路径面板点选某条路径')
     }
     const name = (feature.properties && feature.properties.name) || adcode
@@ -236,6 +504,8 @@ export class ThreeMap {
     this.mode = 'town'
     this.selected = null
     this._clearHighlight()
+    // 进县级后地形要换成该县的高精度晕渲，水系也换成该县自己的数据
+    this._reloadGeoLayers(adcode)
 
     const g = new THREE.Group()
     let any = false
@@ -379,14 +649,7 @@ export class ThreeMap {
 
     // 巡航依赖当前路径的采样与坐标，换视图必须停，否则相机会突然跳；
     // 村级是最深一级，同样不保留路径选中，免得退出小镇后误把点击算进路线
-    this._clearRouteSelection()
-    if (this.cruising) {
-      this.cruising = false
-      this.cruiseAll = false
-      this.cruiseT = 0
-      this.cruiseLook = null
-      this.onRouteChange(this.routeState(), null)
-    }
+    this.clearRouteSelection()
 
     // 单镇视图独占画面：县底图、乡镇总览、路径管道一并隐藏（不是销毁，退出时原样恢复）
     if (this.mapGroup) this.mapGroup.visible = false
@@ -415,12 +678,15 @@ export class ThreeMap {
       communities,
       title: name,
       radius: MAP_W * 0.3,
-      y: DEPTH * 0.5 + 96
+      y: DEPTH * 0.5 + 96,
+      paper: themePaper(this.theme)
     })
     this.villageRing = ring
     this.scene.add(ring.group)
 
     this.mode = 'village'
+    // 单镇视图是"名录环"的示意视图，真实地理图层收起，避免与示意图形混在一起
+    this._setGeoLayersVisible(false)
     this.villageAdcode = (info && info.adcode) || null
     this.villageName = name
     this.selectedTown = fg
@@ -440,6 +706,7 @@ export class ThreeMap {
   _exitVillageView() {
     this._clearVillage()
     this.mode = 'town'
+    this._setGeoLayersVisible(true)
     if (this.mapGroup) this.mapGroup.visible = true
     if (this.townGroup) this.townGroup.visible = true
     this.routes.forEach((r) => {
@@ -589,6 +856,16 @@ export class ThreeMap {
     this.pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1
     this.raycaster.setFromCamera(this.pointer, this.camera)
 
+    // 军事要素优先：符号本来就浮在板块之上，命中最上面的东西才符合直觉
+    if (this.militaryLayer && this.militaryLayer.group.visible && this.militaryLayer.pickables.length) {
+      const mh = this.raycaster.intersectObjects(this.militaryLayer.pickables, false)
+      const f = mh.length && mh[0].object.userData.milFeature
+      if (f) {
+        this.onMilitarySelect(f)
+        return
+      }
+    }
+
     // 镇模式：只拾取乡镇要素（真实边界多边形或回退点位）
     if (this.townGroup) {
       const hits = this.raycaster.intersectObjects(this.townGroup.children, true)
@@ -603,6 +880,9 @@ export class ThreeMap {
           return
         }
       }
+      // 点在乡镇之外的空白处：取消选中，面板与高亮一起收掉
+      this.onMilitarySelect(null)
+      this.clearSelection()
       return
     }
 
@@ -611,9 +891,11 @@ export class ThreeMap {
     for (const h of hits) {
       if (h.object.userData && h.object.userData.feature) {
         this._select(h.object.parent, h.object.userData.feature)
-        break
+        return
       }
     }
+    this.onMilitarySelect(null)
+    this.clearSelection()
   }
 
   _selectTown(fg) {
@@ -667,6 +949,55 @@ export class ThreeMap {
     return d > 0 ? d : null
   }
 
+  /**
+   * 当前视图下 1 屏幕像素 ≈ 多少公里（图廓比例尺用）。
+   * 透视相机下不同深度的尺度不同，这里取「地图面（要素顶面所在平面）」上的尺度，
+   * 也就是比例尺真正承诺的那一个平面；拿不到投影或相机时返回 null，UI 自行隐藏比例尺。
+   */
+  kmPerPixel() {
+    if (!this.projection || !this.camera) return null
+    const h = this.container.clientHeight || 0
+    if (h <= 0) return null
+    const t = this.controls ? this.controls.target : { x: 0, y: 0, z: 0 }
+    const planeY = this.mode === 'town' ? DEPTH + TOWN_DEPTH * 0.5 : DEPTH * 0.5
+    const p = new THREE.Vector3(t.x, planeY, t.z)
+    const dist = this.camera.position.distanceTo(p)
+    if (!(dist > 1)) return null
+    const fov = (this.camera.fov * Math.PI) / 180
+    // 该深度上：半个视口高度对应的世界距离 = dist * tan(fov/2)
+    const pxPerUnit = h / 2 / (dist * Math.tan(fov / 2))
+    const unitsPerKm = this._estimateUnitsPerKm(this.viewCenter)
+    if (!(pxPerUnit > 0) || !(unitsPerKm > 0)) return null
+    return 1 / (pxPerUnit * unitsPerKm)
+  }
+
+  /**
+   * 当前视图下 1 屏幕像素 = 多少世界单位（军标等图面装饰的尺寸基准）。
+   * 与 kmPerPixel 同一个平面、同一套相机参数，只是不做地理换算——
+   * 拿不到相机时返回 null，调用方自行兜底。
+   */
+  unitPerPixel() {
+    if (!this.camera) return null
+    const h = this.container.clientHeight || 0
+    if (h <= 0) return null
+    const t = this.controls ? this.controls.target : { x: 0, y: 0, z: 0 }
+    const planeY = this.mode === 'town' ? DEPTH + TOWN_DEPTH * 0.5 : DEPTH * 0.5
+    const p = new THREE.Vector3(t.x, planeY, t.z)
+    const dist = this.camera.position.distanceTo(p)
+    if (!(dist > 1)) return null
+    const fov = (this.camera.fov * Math.PI) / 180
+    return (dist * Math.tan(fov / 2)) / (h / 2)
+  }
+
+  /** 图廓用的视图信息：当前层级名与比例尺基准，交给 UI 渲染 */
+  frameInfo() {
+    return {
+      level: this.mode, // 'region' | 'town' | 'village'
+      depth: this.adcodeStack.length,
+      kmPerPx: this.kmPerPixel()
+    }
+  }
+
   /** 当前正在编辑的路径（没有则为 null） */
   get route() {
     return this.routeIndex >= 0 ? this.routes[this.routeIndex] || null : null
@@ -678,14 +1009,38 @@ export class ThreeMap {
    * 只是后续单击不再往它身上追加点 —— 是否连线由用户显式选中决定。
    * @returns {boolean} true = 原本有选中路径、本次已取消
    */
-  _clearRouteSelection() {
+  clearRouteSelection() {
     if (this.routeIndex < 0) return false
     if (this.cruising) this.stopCruise()
     this.routeIndex = -1
     this.cruiseT = 0
     this.cruiseLook = null
+    this._restoreNoSelection = false
     this.onRouteChange(this.routeState(), null)
     return true
+  }
+
+  /** 是否正处于「选中了某条路径」的连线状态 */
+  get routeEditing() {
+    return this.routeIndex >= 0
+  }
+
+  /** 取消信息面板的选中态：面板关掉后板块不能还亮着 */
+  clearSelection() {
+    if (this.selectedTown) {
+      const prev = this.selectedTown
+      if (prev.userData.label) prev.userData.label.visible = false
+      if (prev.userData.capMat && prev.userData.baseColor) {
+        prev.userData.capMat.emissive.copy(prev.userData.baseColor).multiplyScalar(0.16)
+      }
+      this.selectedTown = null
+      this.onSelectTown(null)
+    }
+    if (this.selected) {
+      this._clearHighlight()
+      this.onSelect(null)
+    }
+    this._clearEffects()
   }
 
   /** 单条路径 → UI 需要的摘要 */
@@ -731,7 +1086,8 @@ export class ThreeMap {
   /** 新建一条路径并设为当前；name 为空时按序号自动命名 */
   newRoute(name = '') {
     const idx = this.routes.length
-    const c = routeColorAt(idx)
+    const paper = themePaper(this.theme)
+    const c = routeColorAt(idx, paper)
     const r = new RoutePath({
       scene: this.scene,
       lift: 46,
@@ -739,10 +1095,12 @@ export class ThreeMap {
       color: c.color,
       glow: c.glow,
       joint: c.joint,
-      name: name || `路径 ${idx + 1}`
+      name: name || `路径 ${idx + 1}`,
+      paper
     })
     this.routes.push(r)
     this.routeIndex = idx
+    this._restoreNoSelection = false
     this.onRouteChange(this.routeState(), null)
     return idx
   }
@@ -753,6 +1111,7 @@ export class ThreeMap {
     this.stopCruise()
     this.routeIndex = i
     this.cruiseT = 0
+    this._restoreNoSelection = false
     this.onRouteChange(this.routeState(), null)
     return true
   }
@@ -847,6 +1206,9 @@ export class ThreeMap {
       if (!list.length) return false
       // 从当前路径之后的第一条可巡航路径起步，没有就从头开始
       const start = list.find((i) => i >= this.routeIndex)
+      // 未选中路径时「全部巡航」会临时占用 routeIndex，记下来以便停下时还原成未选中，
+      // 否则一次全部巡航就把某条路径悄悄变成了当前编辑对象
+      this._restoreNoSelection = this.routeIndex < 0
       this.routeIndex = start != null ? start : list[0]
       this.cruiseAll = true
     } else {
@@ -872,6 +1234,11 @@ export class ThreeMap {
     if (!this.cruising) return false
     this.cruising = false
     this.cruiseAll = false
+    // 全部巡航是「临时占用」当前路径的，停下即还原为未选中状态
+    if (this._restoreNoSelection) {
+      this._restoreNoSelection = false
+      this.routeIndex = -1
+    }
     // 把巡航末帧的视点交回 OrbitControls，退出后不会突然跳镜头
     if (this.cruiseLook) {
       this.controls.target.copy(this.cruiseLook)
@@ -1037,7 +1404,16 @@ export class ThreeMap {
 
   _bindEvents() {
     const el = this.renderer.domElement
-    this._onClick = (e) => this._pick(e)
+    // 拖动视角（旋转/平移）松手时浏览器仍会补一个 click，若不过滤就会误选中板块、
+    // 甚至在连线路线上凭空多出一个路径点。按下与抬起位移超过阈值即视为拖拽，不算点击。
+    this._onDown = (e) => {
+      this._downX = e.clientX
+      this._downY = e.clientY
+    }
+    this._onClick = (e) => {
+      if (this._downX != null && Math.hypot(e.clientX - this._downX, e.clientY - this._downY) > 5) return
+      this._pick(e)
+    }
     this._onMove = (e) => this._hover(e)
     this._onDblClick = (e) => {
       // 单镇视图已是最深一级，无可下钻
@@ -1057,6 +1433,7 @@ export class ThreeMap {
       this.back()
     }
     this._onResize = () => this._resize()
+    el.addEventListener('pointerdown', this._onDown)
     el.addEventListener('click', this._onClick)
     el.addEventListener('pointermove', this._onMove)
     el.addEventListener('dblclick', this._onDblClick)
@@ -1104,6 +1481,9 @@ export class ThreeMap {
     this.projection = null
     this._clearEffects()
     this.selected = null
+    // 地形晕渲与水系都依赖本层的投影，要素一换就得跟着重建
+    this._clearTerrain()
+    this._clearHydro()
     // 要素已销毁，名称标签不能留在场上指向不存在的板块
     if (this.nameLayer) this.nameLayer.clear()
   }
@@ -1167,6 +1547,11 @@ export class ThreeMap {
 
     // 名称标牌按相机距离缩放，保证拉近拉远都看得清
     if (this.nameLayer) this.nameLayer.update(this.camera)
+    // 军标 / 标牌按屏幕像素恒定：视角一变就重标定（内部有 2% 阈值，静止时零开销）
+    if (this.militaryLayer) {
+      const upp = this.unitPerPixel()
+      if (upp) this.militaryLayer.setScreenScale(upp)
+    }
 
     this.ripples = this.ripples.filter((r) => {
       const alive = r.update(dt)
@@ -1196,7 +1581,11 @@ export class ThreeMap {
     this.routes = []
     this.routeIndex = -1
     if (this.nameLayer) this.nameLayer.dispose()
+    this._clearMilitary()
+    this._clearTerrain()
+    this._clearHydro()
     const el = this.renderer.domElement
+    el.removeEventListener('pointerdown', this._onDown)
     el.removeEventListener('click', this._onClick)
     el.removeEventListener('pointermove', this._onMove)
     el.removeEventListener('dblclick', this._onDblClick)

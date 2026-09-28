@@ -11,6 +11,29 @@
     -apple-system, sans-serif;
 }
 
+/* 兵要地志主题：整块界面跟着换成纸墨配色。
+   深色毛玻璃压在宣纸底上会脏成一团，面板必须改成纸底墨框才像一张图上的附注。 */
+:root.theme-paper {
+  --bg-0: #e5d5b0;
+  --bg-1: #f3e6c8;
+  --accent: #a83232;
+  --accent-2: #8a6a3c;
+  --text-0: #2b2b28;
+  --text-1: #5c5344;
+  --panel-bg: rgba(253, 247, 230, 0.9);
+  --panel-border: rgba(43, 43, 40, 0.32);
+}
+
+:root.theme-paper,
+:root.theme-paper body,
+:root.theme-paper #app {
+  background: #f3e6c8;
+}
+
+:root.theme-paper ::-webkit-scrollbar-thumb {
+  background: rgba(43, 43, 40, 0.3);
+}
+
 * {
   margin: 0;
   padding: 0;

@@ -60,9 +60,41 @@ export const ROUTE_COLORS = [
   { label: '黄', color: 0xfacc15, glow: 0xfef08a, joint: 0xfde047 }
 ]
 
-/** 按序号取一套配色（超出表长则轮转） */
-export function routeColorAt(i) {
-  return ROUTE_COLORS[((i % ROUTE_COLORS.length) + ROUTE_COLORS.length) % ROUTE_COLORS.length]
+// 纸质主题（兵要地志）的路径配色：朱砂、靛青、赭石…取自传统颜料的低饱和色，
+// 不用荧光色——荧光在宣纸底上会立刻跳出来，破坏整张图的调子。
+export const ROUTE_COLORS_PAPER = [
+  { label: '朱砂', color: 0xa83232, glow: 0xd96464, joint: 0x8f2b2b },
+  { label: '靛青', color: 0x2f4858, glow: 0x5b7f92, joint: 0x27384a },
+  { label: '赭石', color: 0x9a6b3f, glow: 0xc79a6a, joint: 0x7d5432 },
+  { label: '墨绿', color: 0x3f5d43, glow: 0x6f8f74, joint: 0x334a37 },
+  { label: '紫檀', color: 0x6b4a6b, glow: 0x9a7f9a, joint: 0x563a56 },
+  { label: '藤黄', color: 0xb08d2e, glow: 0xd8b962, joint: 0x8f7225 }
+]
+
+/** 按序号取一套配色（超出表长则轮转）；纸质主题走低饱和的颜料色 */
+export function routeColorAt(i, paper = null) {
+  const table = paper ? ROUTE_COLORS_PAPER : ROUTE_COLORS
+  return table[((i % table.length) + table.length) % table.length]
+}
+
+// 兵锋线箭头贴图：白色实心箭头 + 描边，用路径自身的颜色染色
+let _arrowTex = null
+function arrowTexture() {
+  if (_arrowTex) return _arrowTex
+  const w = 128
+  const h = 64
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const g = c.getContext('2d')
+  const path = new Path2D('M14 32 L52 8 L52 22 L114 22 L114 42 L52 42 L52 56 Z')
+  g.fillStyle = '#ffffff'
+  g.fill(path)
+  g.lineWidth = 4
+  g.strokeStyle = 'rgba(255,255,255,0.55)'
+  g.stroke(path)
+  _arrowTex = new THREE.CanvasTexture(c)
+  return _arrowTex
 }
 
 /**
@@ -126,12 +158,16 @@ export class RoutePath {
     color = 0x22d3ee,
     glow = 0xa5f3fc,
     joint = 0x7dd3fc,
-    name = ''
+    name = '',
+    paper = null
   } = {}) {
     this.scene = scene
     this.radius = radius
     this.lift = lift
     this.name = name
+    // 纸质主题：管道弱化流动光带并沿线摆兵锋箭头（进攻方向一目了然）
+    this.paper = paper
+    this.arrowsOn = !!(paper && paper.arrows)
     this.color = new THREE.Color(color)
     this.glow = new THREE.Color(glow)
     this.jointColor = new THREE.Color(joint)
@@ -144,6 +180,7 @@ export class RoutePath {
     this.joints = []      // 关节球 + 序号标签
     this.spline = null    // 全局巡航曲线（弧长参数化）
     this.totalLength = 0
+    this.arrows = []      // 兵锋箭头（仅纸质主题）
 
     this.group = new THREE.Group()
     this.group.renderOrder = 5
@@ -155,9 +192,14 @@ export class RoutePath {
     return this.points.length
   }
 
-  /** 该乡镇是否已在路径中（避免重复点击堆点） */
-  has(name) {
-    return this.stops.some(s => s.name === name)
+  /**
+   * 该点是否已在路径中（避免重复点击堆点）。
+   * 只按名称判重会把「市→区→镇」链式下钻里的同名不同级要素误判为重复
+   * （例如同名街道与同名镇），因此带上 adcode：两者都相同才算同一个点。
+   */
+  has(name, adcode = null) {
+    const a = adcode != null ? String(adcode) : null
+    return this.stops.some(s => s.name === name && (!a || s.adcode === a))
   }
 
   /**
@@ -168,8 +210,10 @@ export class RoutePath {
    * @returns {{added:boolean, index:number, reason?:string}}
    */
   addPoint(center, meta = {}) {
-    if (meta.name && this.has(meta.name)) {
-      return { added: false, index: this.stops.findIndex(s => s.name === meta.name), reason: '已在路径中' }
+    const a = meta.adcode != null ? String(meta.adcode) : null
+    if (meta.name && this.has(meta.name, meta.adcode)) {
+      const at = this.stops.findIndex(s => s.name === meta.name && (!a || s.adcode === a))
+      return { added: false, index: at, reason: '已在路径中' }
     }
     const p = center.clone()
     p.y += this.lift
@@ -224,6 +268,7 @@ export class RoutePath {
       this.group.remove(j.group)
       j.dispose()
     }
+    this._clearArrows()
     this.segments = []
     this.joints = []
     this.points = []
@@ -347,6 +392,7 @@ export class RoutePath {
     for (const j of this.joints) {
       if (j.ball) j.ball.material.color.copy(this.jointColor)
     }
+    for (const a of this.arrows) a.mat.color.copy(this.color)
   }
 
   setVisible(v) {
@@ -364,10 +410,11 @@ export class RoutePath {
         uTime: { value: this._t },
         uColor: { value: this.color.clone() },
         uGlow: { value: this.glow.clone() },
-        uSpeed: { value: 0.55 },
+        // 纸面上的"流动光带"要几乎停住：跑动的光是现代大屏语言，作战图上是静止的线
+        uSpeed: { value: this.paper ? 0.18 : 0.55 },
         // 条纹条数按段长换算，保证相邻段条纹物理长度一致
         uRepeat: { value: Math.max(2, Math.round(len / STRIPE_LEN)) },
-        uOpacity: { value: 1 }
+        uOpacity: { value: this.paper ? 0.92 : 1 }
       },
       vertexShader: routeVertexShader,
       fragmentShader: routeFragmentShader,
@@ -402,5 +449,51 @@ export class RoutePath {
     this.spline = s
     this.totalLength = s.getLength()
     // 段长合计（与 spline 略有差异，以 spline 为准用于巡航）
+    // 路径形状变了，兵锋箭头要跟着重排
+    this._buildArrows()
+  }
+
+  /** 兵锋箭头：沿路径均匀摆开，箭头所指即进攻方向 */
+  _buildArrows() {
+    this._clearArrows()
+    if (!this.arrowsOn || !this.spline || this.points.length < 2) return
+    // 短路径也要至少两个箭头（一个看不出方向），长路径封顶 12 个免得糊成一片
+    const n = Math.max(2, Math.min(12, Math.round(this.totalLength / 110)))
+    for (let i = 0; i < n; i++) {
+      const t = THREE.MathUtils.clamp((i + 0.5) / n, 0.02, 0.98)
+      const p = this.spline.getPointAt(t)
+      const tan = this.spline.getTangentAt(t)
+      const geo = new THREE.PlaneGeometry(54, 27)
+      const mat = new THREE.MeshBasicMaterial({
+        map: arrowTexture(),
+        color: this.color.clone(),
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        depthTest: false, // 箭头是符号，浮在管道之上，不能被管道切一半
+        side: THREE.DoubleSide
+      })
+      const mesh = new THREE.Mesh(geo, mat)
+      mesh.position.copy(p)
+      mesh.position.y += 1
+      // YXZ 顺序下 y 是最外层的世界轴：先转向切线方向，再绕 X 躺平贴地
+      mesh.rotation.order = 'YXZ'
+      mesh.rotation.y = Math.atan2(tan.x, tan.z)
+      mesh.rotation.x = -Math.PI / 2
+      mesh.raycast = () => {}
+      mesh.renderOrder = 6
+      this.group.add(mesh)
+      this.arrows.push({ mesh, geo, mat })
+    }
+  }
+
+  _clearArrows() {
+    for (const a of this.arrows) {
+      this.group.remove(a.mesh)
+      a.geo.dispose()
+      // 箭头贴图是模块级共享的，不能在这里 dispose map
+      a.mat.dispose()
+    }
+    this.arrows = []
   }
 }

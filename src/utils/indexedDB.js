@@ -2,9 +2,11 @@
  * IndexedDB 封装层
  *
  * 基于 idb 库提供 Promise 化的 API，统一供 Pinia store 与组件调用。
- * 库结构（版本 1）：
- *   - datasets：数据集元信息（BusinessDataSet），主键 id
- *   - records：业务记录（BusinessRecord），自增主键 _id，按 adcode / datasetId 建索引
+ * 库结构：
+ *   - datasets：业务数据集元信息（BusinessDataSet），主键 id          [v1]
+ *   - records：业务记录（BusinessRecord），自增主键 _id                [v1]
+ *   - milSets：军事要素数据集元信息，主键 id                           [v2]
+ *   - milFeatures：军事要素（驻军 / 布防 / 行军路线…），主键 id         [v2]
  *
  * 说明：所有函数均以 async 暴露，内部统一捕获并向上抛出带中文提示的错误，
  *       便于上层直接把 message 显示给用户。
@@ -14,12 +16,16 @@ import { openDB } from 'idb'
 /** 数据库名称 */
 export const DB_NAME = 'maps-dashboard'
 /** 数据库版本，结构变更时需 +1 并处理 upgrade 分支 */
-export const DB_VERSION = 1
+export const DB_VERSION = 2
 
 /** 数据集元信息仓库 */
 export const STORE_DATASETS = 'datasets'
 /** 业务记录仓库 */
 export const STORE_RECORDS = 'records'
+/** 军事要素数据集元信息仓库 */
+export const STORE_MIL_SETS = 'milSets'
+/** 军事要素仓库 */
+export const STORE_MIL_FEATURES = 'milFeatures'
 
 // 单例 Promise：避免并发首次访问时重复开库触发多次 upgrade
 let dbPromise = null
@@ -44,6 +50,18 @@ export function getDB() {
           rs.createIndex('by-dataset', 'datasetId')
           // 复合索引：先定位数据集再取某区域记录，面板查询的主要路径
           rs.createIndex('by-dataset-adcode', ['datasetId', 'adcode'])
+        }
+        // v2：军事要素（布防 / 驻军 / 行军路线…）。
+        // 军事态势随时代变化，因此要素按「数据集」分组存放，可同时存多份不同年代
+        // 的态势并按需切换显示，而不是只有一份覆盖式的最终状态。
+        if (!db.objectStoreNames.contains(STORE_MIL_SETS)) {
+          const ms = db.createObjectStore(STORE_MIL_SETS, { keyPath: 'id' })
+          ms.createIndex('by-createdAt', 'createdAt')
+        }
+        if (!db.objectStoreNames.contains(STORE_MIL_FEATURES)) {
+          const mf = db.createObjectStore(STORE_MIL_FEATURES, { keyPath: 'id' })
+          mf.createIndex('by-set', 'setId')
+          mf.createIndex('by-kind', 'kind')
         }
       },
       // 其它标签页持有旧版本连接时的回调：提示用户关闭多余页面
@@ -193,4 +211,63 @@ export async function clearAll() {
     tx.objectStore(STORE_RECORDS).clear(),
     tx.done
   ])
+}
+
+/* ------------------------------------------------------------------ */
+/* 军事要素数据集 CRUD（v2）                                             */
+/* ------------------------------------------------------------------ */
+
+/** 新增 / 覆盖一个军事要素数据集元信息 */
+export async function putMilSet(set) {
+  return run((db) => db.put(STORE_MIL_SETS, set))
+}
+
+/** 列出全部军事要素数据集，按创建时间倒序 */
+export async function listMilSets() {
+  const all = await run((db) => db.getAll(STORE_MIL_SETS))
+  return all.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+}
+
+/** 局部更新军事要素数据集（显隐 / 重命名 / 过滤条件） */
+export async function patchMilSet(id, patch) {
+  const db = await getDB()
+  const old = await db.get(STORE_MIL_SETS, id)
+  if (!old) throw new Error('军事要素数据集不存在，可能已被删除')
+  return db.put(STORE_MIL_SETS, { ...old, ...patch, id })
+}
+
+/** 删除军事要素数据集，级联清理其下全部要素 */
+export async function deleteMilSet(id) {
+  const db = await getDB()
+  const tx = db.transaction([STORE_MIL_SETS, STORE_MIL_FEATURES], 'readwrite')
+  const keys = await tx.objectStore(STORE_MIL_FEATURES).index('by-set').getAllKeys(id)
+  await Promise.all([
+    ...keys.map((k) => tx.objectStore(STORE_MIL_FEATURES).delete(k)),
+    tx.objectStore(STORE_MIL_SETS).delete(id),
+    tx.done
+  ])
+}
+
+/** 批量写入军事要素（导入主路径，一个事务保证原子性） */
+export async function bulkPutMilFeatures(features) {
+  const db = await getDB()
+  const tx = db.transaction(STORE_MIL_FEATURES, 'readwrite')
+  const store = tx.objectStore(STORE_MIL_FEATURES)
+  await Promise.all([...features.map((f) => store.put(f)), tx.done])
+  return features.length
+}
+
+/** 取某数据集下的全部军事要素 */
+export async function listMilFeatures(setId) {
+  const db = await getDB()
+  return db.getAllFromIndex(STORE_MIL_FEATURES, 'by-set', setId)
+}
+
+/** 清空某数据集的要素（保留元信息） */
+export async function clearMilFeatures(setId) {
+  const db = await getDB()
+  const tx = db.transaction(STORE_MIL_FEATURES, 'readwrite')
+  const keys = await tx.objectStore(STORE_MIL_FEATURES).index('by-set').getAllKeys(setId)
+  await Promise.all([...keys.map((k) => tx.objectStore(STORE_MIL_FEATURES).delete(k)), tx.done])
+  return keys.length
 }

@@ -67,7 +67,11 @@ export async function loadGeoJSON(adcode = '100000') {
   // 2) 浏览器 IndexedDB
   const cached = await idbGet(adcode)
   if (cached) return cached
-  // 3) DataV 在线 + 写入缓存
+  // 3) DataV 在线 + 写入缓存。
+  // 6 位 adcode 且不是「市 / 省」（后两位不为 00）＝ 区 / 县，已是 DataV 的几何下限，
+  // 必然没有下级面：提前判空，省掉一次注定 404 的往返，也免得控制台刷 "Failed to load resource"。
+  const code = String(adcode)
+  if (code.length === 6 && !code.endsWith('00')) return null
   try {
     const r = await fetch(`${BASE}/${adcode}_full.json`)
     if (!r.ok) return null // 叶子节点（如区/县）无下级面

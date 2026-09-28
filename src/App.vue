@@ -2,8 +2,19 @@
   <div ref="stage" class="stage" :class="{ 'is-fs': isFullscreen, recording: isRecording }">
     <div ref="container" class="map"></div>
 
+    <!-- 兵要地志的图廓层：内外双线图框、图名、指北针、比例尺、图注、钤印、做旧。
+         纯装饰不吃点击（pointer-events: none），只在纸质主题出现。 -->
+    <MapFrame
+      v-if="isPaper"
+      :title="frameTitle"
+      :level-label="frameLevel"
+      :get-km-per-px="() => (map ? map.kmPerPixel() : null)"
+      :geo="geoNote"
+      :mil-stats="milStats"
+    />
+
     <header class="topbar">
-      <div class="title">中国 3D 地图可视化大屏</div>
+      <div class="title">{{ isPaper ? '兵要地志 · 中国行政区划' : '中国 3D 地图可视化大屏' }}</div>
       <Breadcrumb :items="breadcrumb" @select="onCrumb" />
       <div class="palette">
         <button
@@ -20,12 +31,12 @@
       </div>
 
       <div class="tools">
-        <!-- 路径：点开即新建一条巡航路线，此后单击区域 / 乡镇都追加为路径点 -->
+        <!-- 路径：未选中 = 开工（新建/选中一条路线），已选中 = 取消选中退回只看信息 -->
         <button
           class="fsbtn"
           :class="{ active: routeEditing }"
-          :title="routeEditing ? '正在编辑路径：依次单击区域即可连成路线' : '新建一条巡航路径（省 / 市 / 区县 / 乡镇均可连线）'"
-          @click="onRouteNew"
+          :title="routeEditing ? '取消路径选中（Esc）：退回单击只看信息，路径本身保留' : '新建一条巡航路径（省 / 市 / 区县 / 乡镇均可连线）'"
+          @click="onRouteButton"
         >
           <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             <path d="M2.5 12.5c2.4-6 4.6 0 7.2-5" />
@@ -45,6 +56,48 @@
             <path d="M3 4.5h10M3 8h6.5M3 11.5h10" />
           </svg>
           <span>名称</span>
+        </button>
+        <!-- 山系 / 水系：真实地理图层，可分别关掉（关掉后图注里也不再列它） -->
+        <button
+          class="fsbtn"
+          :class="{ active: geoOn.terrain }"
+          :title="geoOn.terrain
+            ? `隐藏山系（晕渲${geoNote && geoNote.peaks ? ` + ${geoNote.peaks} 个山头` : ''}）`
+            : '显示山系（地形晕渲 + 山头）'"
+          @click="onToggleGeo('terrain')"
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M1.5 12.5l4-7 3.2 5 1.8-3 4 5z" />
+          </svg>
+          <span>山系</span>
+        </button>
+        <button
+          class="fsbtn"
+          :class="{ active: geoOn.hydro }"
+          :title="geoOn.hydro
+            ? `隐藏水系${geoNote && geoNote.rivers ? `（${geoNote.rivers} 条河 / ${geoNote.lakes} 个湖）` : ''}`
+            : '显示水系（河川 / 湖泊）'"
+          @click="onToggleGeo('hydro')"
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M2 6c1.6-2 3.2 2 4.8 0S10 4 11.6 6 15 6.5 15 6.5" />
+            <path d="M2 10.5c1.6-2 3.2 2 4.8 0S10 8.5 11.6 10.5 15 11 15 11" />
+          </svg>
+          <span>水系</span>
+        </button>
+        <!-- 军事要素：布防 / 驻军 / 行军路线等随时代变化，一律由导入数据提供 -->
+        <button
+          class="fsbtn"
+          :class="{ active: milOpen }"
+          :title="milStore.totalCount
+            ? `军事要素面板（已导入 ${milStore.sets.length} 个数据集 / ${milStore.totalCount} 个要素）`
+            : '导入军事要素：驻军 / 布防 / 行军路线（支持 CSV、Excel、GeoJSON，模板可下载）'"
+          @click="onMilitaryButton"
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M4 13.5V2.5m0 0h7.5l-2 3 2 3H4" />
+          </svg>
+          <span>军事要素</span>
         </button>
         <button
           class="fsbtn"
@@ -83,7 +136,7 @@
       />
     </header>
 
-    <div v-if="!hasRoute" class="hint">单击查看信息 · 双击下钻（区县→乡镇→村 / 社区）· 右键返回 · 「路径」把省 / 市 / 区县 / 乡镇连成巡航路线 · 「名称」显示本层地名 · F 键全屏</div>
+    <div v-if="!hasRoute" class="hint">单击查看信息 · 双击下钻（区县→乡镇→村 / 社区）· 右键返回 · 「路径」把省 / 市 / 区县 / 乡镇连成巡航路线（Esc 取消连线）· 「山系 / 水系」开关真实地理图层 · 「军事要素」导入布防与行军路线 · F 键全屏</div>
 
     <transition name="fade">
       <div v-if="townHint" class="toast">{{ townHint }}</div>
@@ -93,6 +146,32 @@
 
     <!-- 业务数据导入向导，由顶栏「导入数据」唤起 -->
     <DataImportPanel v-if="showImport" @close="showImport = false" @imported="onImported" />
+
+    <!-- 军事要素：导入向导（含模板下载）与管理面板 -->
+    <MilitaryPanel
+      v-if="showMilImport"
+      @close="showMilImport = false"
+      @imported="onMilImported"
+    />
+    <MilitaryBar
+      v-if="milOpen"
+      :sets="milStore.sets"
+      :eras="milStore.eras"
+      :kind-stats="milStore.kindStats"
+      :era-filter="milStore.eraFilter"
+      :kind-filter="milStore.kindFilter"
+      :shown-count="milStore.renderFeatures.length"
+      :total-count="milStore.totalCount"
+      :picked="milPicked"
+      :paper="isPaper"
+      @import="showMilImport = true"
+      @close="milOpen = false; milPicked = null"
+      @toggle-set="onMilToggleSet"
+      @toggle-label="onMilToggleLabel"
+      @remove-set="onMilRemove"
+      @set-era="onMilEra"
+      @toggle-kind="onMilKind"
+    />
 
     <RouteBar
       :state="routeState"
@@ -107,12 +186,14 @@
       @new-route="onRouteNew"
       @select-route="onRouteSelect"
       @remove-route="onRouteRemove"
+      @deselect="onRouteDeselect"
+      @collapse="routeCollapsed = $event"
     />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ThreeMap } from './map/ThreeMap.js'
 import { getRegionMeta } from './data/regionMeta.js'
 import InfoPanel from './components/InfoPanel.vue'
@@ -121,7 +202,11 @@ import RouteBar from './components/RouteBar.vue'
 import { THEMES, resolveTheme } from './map/palette.js'
 import DataImportPanel from './components/DataImportPanel.vue'
 import RecordButton from './components/RecordButton.vue'
+import MapFrame from './components/MapFrame.vue'
+import MilitaryPanel from './components/MilitaryPanel.vue'
+import MilitaryBar from './components/MilitaryBar.vue'
 import { useBusinessDataStore } from './stores/businessDataStore.js'
+import { useMilitaryStore } from './stores/militaryStore.js'
 
 // 业务数据集（IndexedDB 持久化），装载后可在顶栏按钮看到已有数量
 const store = useBusinessDataStore()
@@ -130,6 +215,12 @@ const showImport = ref(false)
 function onImported(ds) {
   showTownHint(`已导入「${ds.name}」，共 ${ds.recordCount} 条记录`)
 }
+
+// 军事要素（驻军 / 布防 / 行军路线…）：同样落在 IndexedDB，按数据集分年代存放
+const milStore = useMilitaryStore()
+const showMilImport = ref(false)
+const milOpen = ref(false)
+const milPicked = ref(null)
 
 // 主题切换器：每项给出 3 个代表色用于按钮渐变预览
 const themes = Object.fromEntries(
@@ -144,6 +235,29 @@ const themes = Object.fromEntries(
   })
 )
 const current = ref(resolveTheme())
+// 纸质主题：界面外壳与图廓层都只在兵要地志下出现
+const isPaper = computed(() => current.value === 'campaign')
+
+// 兵要地志是纸质主题，界面外壳（面板/文字）也要一并换成纸墨配色，
+// 否则深色毛玻璃压在宣纸底上不伦不类。切换主题会带参数重载，这里只管初始化。
+if (isPaper.value) document.documentElement.classList.add('theme-paper')
+
+// 图廓上的图名 / 层级：随面包屑变化（下钻、返回、进单镇都会重发面包屑）
+// navTick 只是让 computed 在层级切换时重新求值，本身不参与显示
+const navTick = ref(0)
+const frameTitle = computed(() => {
+  navTick.value
+  const b = breadcrumb.value
+  return b.length ? b[b.length - 1] : '中国'
+})
+const frameLevel = computed(() => {
+  navTick.value
+  if (!map) return '国家级'
+  if (map.mode === 'village') return '村级 · 名录展示'
+  if (map.mode === 'town') return '乡镇级'
+  const d = breadcrumb.value.length - 1
+  return ['国家级', '省级', '市级', '区县级'][d] || '行政区'
+})
 
 function pickTheme(key) {
   const url = new URL(window.location.href)
@@ -158,6 +272,19 @@ const breadcrumb = ref(['中国'])
 const townHint = ref('')
 const townSource = ref('')
 const isFullscreen = ref(false)
+// 山系 / 水系图层的来源与要素数（地形晕渲、河流、湖泊），图廓图注要用
+const geoNote = ref(null)
+// 山系 / 水系全局显隐：状态本机记忆，关掉的图层不进图注，避免图注说一套、画面画一套
+const geoOn = ref({ terrain: true, hydro: true })
+const GEO_KEY = 'maps-dashboard:geo-on'
+try {
+  const saved = JSON.parse(localStorage.getItem(GEO_KEY) || 'null')
+  if (saved && typeof saved === 'object') {
+    geoOn.value = { terrain: saved.terrain !== false, hydro: saved.hydro !== false }
+  }
+} catch (e) {
+  /* 隐私模式下不可读，按全部显示处理 */
+}
 // 地图初始化是否成功：WebGL 不可用时录制不可用，由这个开关关掉入口
 const mapReady = ref(false)
 // 录制进行中：给舞台挂 class，收起会干扰画面的控件
@@ -166,6 +293,8 @@ const isRecording = ref(false)
 const routeState = ref(null)
 const routeActive = ref(-1)
 const routeHint = ref('')
+// 路径面板是否被折叠：折叠后只剩一条窄胶囊，底部操作提示要还回来
+const routeCollapsed = ref(false)
 // 名称立体显示开关：状态持久在本机，跨层级保持（全国看省名、进省看市名）
 const namesOn = ref(false)
 const nameCount = ref(0)
@@ -277,6 +406,21 @@ function onKeydown(e) {
   if (e.key === 'f' || e.key === 'F') {
     e.preventDefault()
     toggleFullscreen()
+    return
+  }
+  // Esc：先退路径连线，再关信息面板 —— 每一层都能用手退出，不留死角
+  if (e.key === 'Escape') {
+    if (routeEditing.value) {
+      e.preventDefault()
+      onRouteDeselect()
+    } else if (milPicked.value) {
+      // 军事要素详情先退：它是最上层、最轻的一层
+      e.preventDefault()
+      milPicked.value = null
+    } else if (selected.value) {
+      e.preventDefault()
+      closePanel()
+    }
   }
 }
 
@@ -291,8 +435,10 @@ function onRouteChange(state) {
   if (!state.count) routeActive.value = -1
 }
 
-// 面板一旦出现就占住左下角，底部提示条要让位（哪怕当前没有选中任何路径）
-const hasRoute = computed(() => !!(routeState.value && routeState.value.paths && routeState.value.paths.length))
+// 面板展开时占住左下角，底部提示条让位；折叠成窄胶囊后提示条还回来
+const hasRoute = computed(
+  () => !routeCollapsed.value && !!(routeState.value && routeState.value.paths && routeState.value.paths.length)
+)
 
 // ---------- 名称立体显示 ----------
 
@@ -319,6 +465,95 @@ function onToggleNames() {
   if (want && !on) showTownHint('当前层级没有可显示的名称')
 }
 
+// ---------- 山系 / 水系显隐 ----------
+
+function onToggleGeo(kind) {
+  if (!map) return
+  const want = !geoOn.value[kind]
+  map.setGeoVisible(kind, want)
+  geoOn.value = { ...geoOn.value, [kind]: want }
+  try {
+    localStorage.setItem(GEO_KEY, JSON.stringify(geoOn.value))
+  } catch (e) {
+    /* 隐私模式下不可写，忽略 */
+  }
+  showTownHint(want ? `已显示${kind === 'terrain' ? '山系' : '水系'}` : `已隐藏${kind === 'terrain' ? '山系' : '水系'}`)
+}
+
+// ---------- 军事要素 ----------
+
+/** 当前显示在图上的军事要素按类型计数，交给图廓做图注（画面有什么才列什么） */
+const milStats = computed(() => {
+  const out = {}
+  for (const f of milStore.renderFeatures) out[f.kind] = (out[f.kind] || 0) + 1
+  return out
+})
+
+/** 顶栏「军事要素」：有导入数据就开管理面板，没有就直接进导入向导 */
+function onMilitaryButton() {
+  if (!milStore.sets.length) {
+    showMilImport.value = true
+    return
+  }
+  milOpen.value = !milOpen.value
+}
+
+/** 把 store 里过滤后的要素推给地图重建图层 */
+function pushMilitary() {
+  if (!map) return
+  map.setMilitaryFeatures(milStore.renderFeatures)
+  // 标注开关要跟着 store 走：图层每次重建都是从零搭起来的，
+  // 不重设的话导入后只剩光秃秃的符号，名称标牌永远出不来
+  map.setMilitaryLabels(milStore.sets.some((s) => s.visible !== false && s.labelOn !== false))
+}
+
+// 数据集显隐 / 时期 / 类型过滤一变就重画（要素量级通常几十到几百，重建成本可接受）
+watch(() => milStore.renderFeatures, () => pushMilitary())
+
+async function onMilImported({ name, features }) {
+  const ds = await milStore.create({ name, features })
+  if (!ds) {
+    showTownHint(milStore.error || '军事要素导入失败')
+    return
+  }
+  await milStore.ensureFeatures()
+  pushMilitary()
+  milOpen.value = true
+  showTownHint(`已导入「${ds.name}」：${ds.featureCount} 个要素`)
+}
+
+async function onMilToggleSet(id, visible) {
+  await milStore.setVisible(id, visible)
+  pushMilitary()
+}
+
+async function onMilToggleLabel(id, on) {
+  await milStore.setLabelOn(id, on)
+  // 标注开关只影响名称标牌，不重建几何
+  if (map) map.setMilitaryLabels(milStore.sets.some((s) => s.visible !== false && s.labelOn !== false))
+}
+
+async function onMilRemove(id) {
+  await milStore.remove(id)
+  pushMilitary()
+}
+
+function onMilEra(v) {
+  milStore.setEraFilter(v)
+  pushMilitary()
+}
+
+function onMilKind(key) {
+  milStore.toggleKind(key)
+  pushMilitary()
+}
+
+/** 点地图上的军标：展开详情；点了空白处则收起详情 */
+function onMilPick(f) {
+  milPicked.value = f || null
+  if (f) milOpen.value = true
+}
+
 onMounted(async () => {
   // 全屏监听/快捷键必须先挂：地图初始化或首屏数据失败时也不能把 UI 控制一起拖垮
   document.addEventListener('fullscreenchange', onFsChange)
@@ -337,8 +572,13 @@ onMounted(async () => {
       onSelectTown: (town) => {
         selected.value = town ? townToPanel(town) : null
       },
+      // 军事要素：点击军标 / 路线看详情
+      onMilitarySelect: (f) => {
+        onMilPick(f)
+      },
       onBreadcrumb: (names) => {
         breadcrumb.value = names
+        navTick.value++ // 图廓的图名 / 层级跟着换
         // 换层级会重建名称标签，开关状态与数量要同步回 UI
         syncNames()
       },
@@ -347,6 +587,10 @@ onMounted(async () => {
       },
       onLevelHint: (text) => {
         showTownHint(text)
+      },
+      // 山系 / 水系：把来源与要素数交给图廓，图注里要写清这些线是怎么来的
+      onGeoChange: (s) => {
+        geoNote.value = s
       },
       onTownInfo: (info) => {
         townSource.value = info && info.sources
@@ -371,6 +615,18 @@ onMounted(async () => {
     // 上次开着名称显示就恢复（下钻后由地图内部沿用同一开关状态）
     if (namesWanted) map.setNamesVisible(true)
     syncNames()
+    // 山系 / 水系按本机记忆的开关初始化（默认全开）
+    map.setGeoVisible('terrain', geoOn.value.terrain)
+    map.setGeoVisible('hydro', geoOn.value.hydro)
+    // 军事要素：库里已有的读完就画上（异步，不阻塞首屏）
+    milStore
+      .load()
+      .then(async () => {
+        await milStore.ensureFeatures()
+        pushMilitary()
+        if (map) map.setMilitaryLabels(milStore.sets.some((s) => s.visible !== false && s.labelOn !== false))
+      })
+      .catch(() => {})
   } catch (e) {
     // 例如浏览器/驱动不支持 WebGL：给出提示而不是留一块黑屏
     console.error('[maps-dashboard] 地图初始化失败', e)
@@ -422,9 +678,47 @@ function onRouteFocus(i) {
 // ---------- 多条路径 ----------
 function onRouteNew() {
   if (!map) return
-  map.newRoute()
+  const s = map.routeState()
+  // 已经有一条还没连点的空路径时不要重复堆：直接选中它，否则面板会冒出一串 0 点路径
+  const empty = (s.paths || []).filter((p) => p.count === 0)
+  if (empty.length) {
+    map.selectRoute(empty[empty.length - 1].index)
+    showRouteHint('已选中空白路径：依次单击区域即可连线')
+  } else {
+    map.newRoute()
+    showRouteHint('已新建路径：依次单击区域即可连线，省 / 市 / 区县 / 乡镇都可以作为路径点')
+  }
   routeState.value = map.routeState()
-  showRouteHint('已新建路径：依次单击区域即可连线，省 / 市 / 区县 / 乡镇都可以作为路径点')
+}
+
+/** 取消路径选中：回到「单击只看信息」，路径与已连的点全部保留 */
+function onRouteDeselect() {
+  if (!map) return
+  if (!map.clearRouteSelection()) {
+    showRouteHint('当前没有选中的路径')
+    return
+  }
+  routeState.value = map.routeState()
+  routeActive.value = -1
+  showTownHint('已取消路径选中：单击地图只看信息，路径与已连的点都保留')
+}
+
+/** 顶栏「路径」按钮：未连线 = 开工，已连线 = 收手，避免选中后退不出来 */
+function onRouteButton() {
+  if (routeEditing.value) {
+    onRouteDeselect()
+    return
+  }
+  const paths = (routeState.value && routeState.value.paths) || []
+  // 已经有路线就接着最后一条连，不再凭空开一条空的（要新开用面板的「＋」）
+  if (paths.length) {
+    const last = paths[paths.length - 1]
+    map.selectRoute(last.index)
+    routeState.value = map.routeState()
+    showTownHint(`已选中「${last.name}」：单击地图继续连线`)
+    return
+  }
+  onRouteNew()
 }
 function onRouteSelect(i) {
   if (!map) return
@@ -451,6 +745,8 @@ function onCrumb(i) {
 }
 function closePanel() {
   selected.value = null
+  // 面板关掉后地图上的高亮/选中态也要一起清，否则板块还亮着却不知道选的是谁
+  if (map) map.clearSelection()
 }
 </script>
 
@@ -499,8 +795,8 @@ function closePanel() {
   color: var(--text-1);
   padding: 5px 12px 5px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(120, 160, 220, 0.25);
-  background: rgba(10, 20, 38, 0.55);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -516,12 +812,12 @@ function closePanel() {
 }
 .swatch:hover {
   color: var(--text-0);
-  border-color: rgba(120, 200, 255, 0.5);
+  border-color: var(--accent-2);
 }
 .swatch.active {
-  color: #fff;
-  border-color: var(--accent-2);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+  color: var(--text-0);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .tools {
   display: flex;
@@ -534,8 +830,8 @@ function closePanel() {
   color: var(--text-1);
   padding: 5px 12px;
   border-radius: 999px;
-  border: 1px solid rgba(120, 160, 220, 0.25);
-  background: rgba(10, 20, 38, 0.55);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -543,12 +839,12 @@ function closePanel() {
 }
 .fsbtn:hover {
   color: var(--text-0);
-  border-color: rgba(120, 200, 255, 0.5);
+  border-color: var(--accent-2);
 }
 .fsbtn.active {
-  color: #fff;
-  border-color: var(--accent-2);
-  box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+  color: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .fsbtn svg {
   fill: none;
@@ -572,8 +868,8 @@ function closePanel() {
   letter-spacing: 1px;
   padding: 6px 16px;
   border-radius: 999px;
-  background: rgba(10, 20, 38, 0.6);
-  border: 1px solid rgba(56, 189, 248, 0.2);
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
   z-index: 10;
 }
 .toast {
