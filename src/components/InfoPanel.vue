@@ -138,6 +138,31 @@
         </div>
       </div>
 
+      <!-- 业务数据（导入的业务数据集按 adcode 匹配到本区域） -->
+      <div class="sec" :class="{ open: open.business }" v-if="business && bizRecords.length">
+        <button class="sech" @click="open.business = !open.business">
+          <span class="set">业务数据</span>
+          <span class="badge">{{ business.records.length }} 条</span>
+          <svg class="chev" viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M6 3l5 5-5 5" /></svg>
+        </button>
+        <div class="secb" v-show="open.business">
+          <div v-for="(rec, i) in bizRecords" :key="i" class="bizrec">
+            <div
+              class="attr"
+              v-for="row in rec.rows"
+              :key="row.key"
+              :class="{ hot: row.key === business.fieldKey }"
+            >
+              <span class="ak">{{ row.label }}</span>
+              <span class="av">{{ row.value }}</span>
+            </div>
+          </div>
+          <div class="dim" v-if="business.records.length > bizRecords.length">
+            仅显示前 {{ bizRecords.length }} 条，共 {{ business.records.length }} 条
+          </div>
+        </div>
+      </div>
+
       <!-- 图片集合 -->
       <div class="sec" :class="{ open: open.gallery }" v-if="images.length">
         <button class="sech" @click="open.gallery = !open.gallery">
@@ -171,6 +196,8 @@ import { formatPopulation, formatArea, formatNumber } from '../utils/format.js'
 // info 为官方展示信息（scripts/fetch-town-info.mjs 生成）：人口、辖区面积、下辖村社区、联系方式…
 const props = defineProps({
   data: { type: Object, default: null },
+  // 业务明细：{ records, fields, fieldKey } —— 导入的业务数据集按 adcode 匹配到本区域
+  business: { type: Object, default: null },
   sourceLabel: { type: String, default: '' }
 })
 defineEmits(['close'])
@@ -190,7 +217,7 @@ const communities = computed(() => (info.value ? info.value.communities || [] : 
 const wan = (mu) => (mu ? Number((mu / 10000).toFixed(2)) + ' 万亩' : null)
 
 // 长内容分区按需展开（状态挂在组件实例上，切换乡镇不会重置，展开过就保持展开）
-const open = reactive({ detail: false, village: false, geo: false, contact: false, attr: false, gallery: true })
+const open = reactive({ detail: false, village: false, geo: false, contact: false, attr: false, gallery: true, business: true })
 
 // 简介默认截断；超过阈值才给「展开全文」
 const introText = computed(() => {
@@ -262,6 +289,30 @@ const contactRows = computed(() => {
   push('电子邮箱', t.email)
   push('办公时间', t.officeHours)
   return rows
+})
+
+/**
+ * 业务明细：只取「可见且非结构性」的字段。
+ * adcode / 名称 / 层级 / 上级编码是匹配用的结构列，对用户没有信息量，不重复展示。
+ */
+const bizRecords = computed(() => {
+  const b = props.business
+  if (!b || !b.records || !b.records.length) return []
+  const fields = (b.fields || []).filter((f) => {
+    if (!f || f.key == null) return false
+    if (f.visible === false) return false
+    return !['adcode', 'regionName', 'level', 'parentAdcode'].includes(String(f.key))
+  })
+  // 明细条数可能很多，只取前若干条，避免把面板撑满屏高
+  return b.records.slice(0, 12).map((r) => ({
+    rows: fields
+      .map((f) => {
+        const data = r.data || {}
+        const v = data[f.key]
+        return v == null || v === '' ? null : { key: f.key, label: f.label || f.key, value: String(v) }
+      })
+      .filter(Boolean)
+  }))
 })
 </script>
 
@@ -514,6 +565,26 @@ const contactRows = computed(() => {
   color: var(--text-0);
   font-weight: 600;
   text-align: right;
+}
+/* 业务明细：每条记录一组字段；当前着色指标那行高亮 */
+.bizrec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.bizrec:last-of-type {
+  margin-bottom: 0;
+}
+.attr.hot {
+  border-color: var(--accent);
+  background: rgba(56, 189, 248, 0.14);
+}
+.dim {
+  padding-top: 4px;
+  font-size: 11px;
+  color: var(--text-1);
+  opacity: 0.75;
 }
 .sub {
   margin-top: 8px;

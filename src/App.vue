@@ -142,7 +142,12 @@
       <div v-if="townHint" class="toast">{{ townHint }}</div>
     </transition>
 
-    <InfoPanel :data="selected" :source-label="townSource" @close="closePanel" />
+    <InfoPanel
+      :data="selected"
+      :business="businessRecords"
+      :source-label="townSource"
+      @close="closePanel"
+    />
 
     <!-- 业务数据导入向导，由顶栏「导入数据」唤起 -->
     <DataImportPanel v-if="showImport" @close="showImport = false" @imported="onImported" />
@@ -171,6 +176,23 @@
       @remove-set="onMilRemove"
       @set-era="onMilEra"
       @toggle-kind="onMilKind"
+    />
+
+    <!-- 业务数据：数据集 / 指标 / 聚合 + 分级色阶图例 -->
+    <BusinessBar
+      v-if="businessOpen || store.dataSets.length"
+      :datasets="store.dataSets"
+      :field-key="businessField"
+      :aggregate="businessAgg"
+      :active="businessActive"
+      :legend="businessLegend"
+      :paper="isPaper"
+      @import="showImport = true"
+      @close="businessOpen = false"
+      @select-dataset="onBizSelectDataset"
+      @select-field="onBizSelectField"
+      @set-agg="onBizSetAgg"
+      @toggle="onBizToggle"
     />
 
     <RouteBar
@@ -205,6 +227,7 @@ import RecordButton from './components/RecordButton.vue'
 import MapFrame from './components/MapFrame.vue'
 import MilitaryPanel from './components/MilitaryPanel.vue'
 import MilitaryBar from './components/MilitaryBar.vue'
+import BusinessBar from './components/BusinessBar.vue'
 import { useBusinessDataStore } from './stores/businessDataStore.js'
 import { useMilitaryStore } from './stores/militaryStore.js'
 
@@ -212,8 +235,114 @@ import { useMilitaryStore } from './stores/militaryStore.js'
 const store = useBusinessDataStore()
 const showImport = ref(false)
 
-function onImported(ds) {
+// ---------- 业务数据：分级着色与明细 ----------
+// store 的存取动作此前已全部实现，但导入后从未接回地图 / 面板，这里补齐这一环。
+const businessOpen = ref(false)      // 业务面板是否显示
+const businessField = ref('')        // 当前指标字段
+const businessAgg = ref('sum')       // sum | avg | count
+const businessActive = ref(false)    // 是否已上色
+const businessLegend = ref(null)     // 图例（极值 / 色阶 / 字段）
+const businessRecords = ref(null)    // 当前选中区域的业务明细，交给信息面板
+
+const activeBizDs = computed(
+  () => store.activeSets[0] || store.dataSets.find((d) => d.isActive) || null
+)
+
+/** 当前激活数据集的数值字段（指标下拉用） */
+const businessNumericFields = computed(() =>
+  (activeBizDs.value && activeBizDs.value.fields ? activeBizDs.value.fields : [])
+    .filter((f) => f && f.type === 'number' && f.visible !== false)
+    .map((f) => ({ key: f.key, label: f.label }))
+)
+
+async function onImported(ds) {
   showTownHint(`已导入「${ds.name}」，共 ${ds.recordCount} 条记录`)
+  businessField.value = ''
+  businessAgg.value = 'sum'
+  await applyBusinessLayer()
+  if (businessActive.value) businessOpen.value = true
+}
+
+/** 把当前激活数据集的指标聚合后染到地图上：业务数据真正上图的关键一步 */
+async function applyBusinessLayer() {
+  if (!map) return
+  const ds = activeBizDs.value
+  if (!ds) {
+    map.clearBusinessLayer()
+    businessActive.value = false
+    businessLegend.value = null
+    return
+  }
+  const recs = await store.allRecords(ds.id)
+  const fieldKey =
+    businessField.value || (businessNumericFields.value[0] && businessNumericFields.value[0].key)
+  if (!fieldKey) {
+    map.clearBusinessLayer()
+    businessActive.value = false
+    businessLegend.value = null
+    showTownHint(`「${ds.name}」没有可用于着色的数值字段`)
+    return
+  }
+  businessField.value = fieldKey
+  const info = map.setBusinessLayer({
+    datasetId: ds.id,
+    fields: ds.fields,
+    records: recs,
+    fieldKey,
+    aggregate: businessAgg.value
+  })
+  if (info) {
+    businessActive.value = true
+    businessLegend.value = map.businessLegend()
+  } else {
+    businessActive.value = false
+    businessLegend.value = null
+    showTownHint(`「${ds.name}」中「${fieldKey}」没有可聚合的数值`)
+  }
+}
+
+/** 选中某区域时拉取其业务明细，交给信息面板展示 */
+async function loadBusinessRecords(adcode) {
+  const ds = activeBizDs.value
+  if (!ds || !adcode) {
+    businessRecords.value = null
+    return
+  }
+  try {
+    const recs = await store.recordsOf(ds.id, adcode)
+    businessRecords.value =
+      recs && recs.length ? { records: recs, fields: ds.fields, fieldKey: businessField.value } : null
+  } catch (e) {
+    businessRecords.value = null
+  }
+}
+
+function onRegionSelect(feature) {
+  selected.value = feature ? regionToPanel(feature) : null
+  if (feature) loadBusinessRecords(String(feature.properties.adcode))
+  else businessRecords.value = null
+}
+
+// BusinessBar 事件
+function onBizSelectDataset(id) {
+  store.setActive(id, true).then(applyBusinessLayer)
+}
+function onBizSelectField(key) {
+  businessField.value = key
+  applyBusinessLayer()
+}
+function onBizSetAgg(agg) {
+  businessAgg.value = agg
+  applyBusinessLayer()
+}
+function onBizToggle(on) {
+  if (on) {
+    applyBusinessLayer()
+    return
+  }
+  if (map) map.clearBusinessLayer()
+  businessActive.value = false
+  businessLegend.value = null
 }
 
 // 军事要素（驻军 / 布防 / 行军路线…）：同样落在 IndexedDB，按数据集分年代存放
@@ -562,13 +691,12 @@ onMounted(async () => {
   isFullscreen.value = !!fsElement()
 
   // 读取本机已导入的数据集；失败不影响地图本身，store 内部已记 error
-  store.load().catch(() => {})
+  // 这里必须等装载完成，后面才能据此给已有数据集自动分级着色
+  await store.load().catch(() => {})
 
   try {
     map = new ThreeMap(container.value, {
-      onSelect: (feature) => {
-        selected.value = feature ? regionToPanel(feature) : null
-      },
+      onSelect: (feature) => onRegionSelect(feature),
       onSelectTown: (town) => {
         selected.value = town ? townToPanel(town) : null
       },
@@ -612,6 +740,15 @@ onMounted(async () => {
     mapReady.value = true
     // 调试出口：控制台里可直接操作地图实例做自动化验证与排障，不参与任何界面逻辑
     window.__map = map
+    // 业务数据：库里已有激活的数据集就自动分级着色（异步，不阻塞首屏其余交互）
+    if (store.activeSets.length) {
+      try {
+        await applyBusinessLayer()
+        if (businessActive.value) businessOpen.value = true
+      } catch (e) {
+        console.error('[maps-dashboard] 业务数据上色失败', e)
+      }
+    }
     // 上次开着名称显示就恢复（下钻后由地图内部沿用同一开关状态）
     if (namesWanted) map.setNamesVisible(true)
     syncNames()

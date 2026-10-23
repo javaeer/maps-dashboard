@@ -95,8 +95,11 @@ export class ThreeMap {
     // 拖拽判定：按下坐标，用于把「拖视角松手」和真正的单击区分开
     this._downX = null
     this._downY = null
-    // 配色主题：支持 URL 参数 ?palette=tech|aurora|sunset 现场切换
+    // 配色主题：支持 URL 参数 ?palette=tech|aurora|sunset|campaign 现场切换
     this.theme = resolveTheme()
+    this.isPaper = !!themePaper(this.theme)
+    // 业务数据分级着色层：导入并激活数据集后染到板块上，换层级自动重绘
+    this.businessLayer = null
     // 每帧渲染完成后的回调，供视频录制抓取画面；未设置时不产生任何开销
     this.onFrame = null
 
@@ -216,6 +219,8 @@ export class ThreeMap {
     this._rebuildMilitary()
     // 山系与水系依赖新投影，异步重建（不阻塞出图）
     this._reloadGeoLayers()
+    // 业务数据分级着色：换层级后用同一份聚合结果重绘
+    this._applyBusinessLayerTo(this.featureGroups)
   }
 
   // ---------- 山系（晕渲 / 山头）与水系 ----------
@@ -461,6 +466,133 @@ export class ThreeMap {
     return this.militaryLabels
   }
 
+  // ---------- 业务数据分级着色（choropleth） ----------
+  // 设计要点：
+  //  - 业务数据集按 adcode 聚合某指标（求和 / 均值 / 计数），映射成色阶染到对应板块上；
+  //  - 着色只改 capMat.color 与 sideMat 的 uColor，不重建几何，换层级/主题都靠重绘还原；
+  //  - 无数据的区域回落主题基色，不强行染色；业务层为空时整体还原基色。
+  // 这是把「已导入却从未上图」的业务数据真正接入地图的关键一步。
+
+  /** 取某 t∈[0,1] 对应的分级色（蓝低→红高；纸质主题走墨→朱砂） */
+  _businessColor(t) {
+    t = Math.max(0, Math.min(1, t))
+    if (this.isPaper) {
+      return new THREE.Color(0x2b2b28).lerp(new THREE.Color(0xa83232), t)
+    }
+    const c = new THREE.Color()
+    // 色相 210°(蓝) → 0°(红)，经青/绿/黄，给大屏醒目的分级渐变
+    c.setHSL((210 - 210 * t) / 360, 0.7, 0.5)
+    return c
+  }
+
+  /** 把当前业务层（或基色）应用到一组要素组 */
+  _applyBusinessLayerTo(featureGroups) {
+    if (!featureGroups || !featureGroups.length) return
+    const layer = this.businessLayer
+    for (const fg of featureGroups) {
+      const u = fg.userData
+      if (!u || !u.capMat || !u.baseColor) continue
+      const reset = () => {
+        u.capMat.color.copy(u.baseColor)
+        u.capMat.emissive.copy(u.baseColor).multiplyScalar(this.isPaper ? 0.04 : 0.18)
+        if (u.sideMat && u.sideMat.uniforms && u.sideMat.uniforms.uColor) {
+          u.sideMat.uniforms.uColor.value.copy(u.baseColor)
+        }
+      }
+      if (!layer) {
+        reset()
+        continue
+      }
+      const feature = u.feature
+      const ac = String((feature && feature.properties && feature.properties.adcode) ?? '').trim()
+      const agg = layer.values.get(ac)
+      if (!agg) {
+        reset()
+        continue
+      }
+      const value =
+        layer.aggregate === 'avg'
+          ? agg.count
+            ? agg.sum / agg.count
+            : 0
+          : layer.aggregate === 'count'
+            ? agg.count
+            : agg.sum
+      const t = layer.max > layer.min ? (value - layer.min) / (layer.max - layer.min) : 1
+      const col = this._businessColor(t)
+      u.capMat.color.copy(col)
+      u.capMat.emissive.copy(col).multiplyScalar(this.isPaper ? 0.04 : 0.18)
+      if (u.sideMat && u.sideMat.uniforms && u.sideMat.uniforms.uColor) {
+        u.sideMat.uniforms.uColor.value.copy(col)
+      }
+    }
+  }
+
+  /**
+   * 设置业务数据分级着色。
+   * @param {{datasetId:string, fields:Array, records:Array, fieldKey:string, aggregate?:'sum'|'avg'|'count'}} opts
+   * @returns {{min:number,max:number,count:number,fieldKey:string}|null}
+   */
+  setBusinessLayer(opts) {
+    if (!opts || !opts.records || !opts.fieldKey) return null
+    const { fieldKey, aggregate = 'sum' } = opts
+    const values = new Map()
+    for (const r of opts.records) {
+      const ac = String((r && r.adcode) ?? '').trim()
+      if (!ac) continue
+      const data = (r && r.data) || r
+      const v = Number(data ? data[fieldKey] : undefined)
+      if (Number.isNaN(v)) continue
+      const a = values.get(ac) || { sum: 0, count: 0 }
+      a.sum += v
+      a.count += 1
+      values.set(ac, a)
+    }
+    if (!values.size) return null
+    let min = Infinity
+    let max = -Infinity
+    for (const a of values.values()) {
+      const val =
+        aggregate === 'avg' ? (a.count ? a.sum / a.count : 0) : aggregate === 'count' ? a.count : a.sum
+      if (val < min) min = val
+      if (val > max) max = val
+    }
+    const fieldMeta = (opts.fields || []).find((f) => f && f.key === fieldKey)
+    this.businessLayer = {
+      datasetId: opts.datasetId,
+      fieldKey,
+      aggregate,
+      values,
+      min,
+      max,
+      fieldLabel: fieldMeta ? fieldMeta.label || fieldMeta.key : fieldKey
+    }
+    this._applyBusinessLayerTo(this.featureGroups)
+    this._applyBusinessLayerTo(this.townFeatureGroups)
+    this._applyBusinessLayerTo(this.villageFeatureGroups)
+    return { min, max, count: values.size, fieldKey }
+  }
+
+  /** 清除业务数据着色，整体还原主题基色 */
+  clearBusinessLayer() {
+    this.businessLayer = null
+    this._applyBusinessLayerTo(this.featureGroups)
+    this._applyBusinessLayerTo(this.townFeatureGroups)
+    this._applyBusinessLayerTo(this.villageFeatureGroups)
+  }
+
+  /** 当前业务着色图例（色阶 + 极值 + 字段），供 UI 画渐变条 */
+  businessLegend() {
+    if (!this.businessLayer) return null
+    const { min, max, fieldKey, fieldLabel, aggregate, values } = this.businessLayer
+    const stops = []
+    for (let i = 0; i <= 6; i++) {
+      const t = i / 6
+      stops.push({ t, color: '#' + this._businessColor(t).getHexString() })
+    }
+    return { min, max, fieldKey, fieldLabel, aggregate, stops, count: values.size }
+  }
+
   // 下钻：先探测是否有下级面；有则渲染面，无（叶子区县）则进入镇点位视图
   async drill(feature) {
     const p = feature.properties || {}
@@ -534,6 +666,7 @@ export class ThreeMap {
         this.townSideMaterials = built.sideMaterials
         this.townFeatureGroups = built.featureGroups
         if (built.featureGroups.length) g.add(built.group)
+        this._applyBusinessLayerTo(this.townFeatureGroups)
         for (const fg of built.featureGroups) {
           const props = fg.userData.feature.properties || {}
           const tname = props.name || props.乡 || props.镇 || props.town || ''
@@ -670,6 +803,7 @@ export class ThreeMap {
     this.villageFeatureGroups = built.featureGroups
     this.villageSideMaterials = built.sideMaterials
     this.scene.add(this.villageGroup)
+    this._applyBusinessLayerTo(this.villageFeatureGroups)
 
     // 名录环挂在 scene 而非 villageGroup：后者整体绕 X 轴转了 -90°，
     // 挂在它下面 Sprite 的位置会被一起转平，标牌就躺到地面上了

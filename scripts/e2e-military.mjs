@@ -1,10 +1,12 @@
 // 端到端验证：山系 / 水系全局显隐 + 军事要素导入
-import { createRequire } from 'module'
+// 运行：先 npm run dev，再 npm run test:e2e
+// 环境可覆盖：E2E_BASE_URL / E2E_PORT / E2E_CHROME_PATH
 import fs from 'fs'
-const require = createRequire('/Users/microworld/.workbuddy/binaries/node/workspace/')
-const { chromium } = require('playwright-core')
+import { chromium } from 'playwright-core'
 
-const URL = 'http://127.0.0.1:8130/index.html?palette=campaign'
+// 地址与端口不写死：默认 8130，换端口或上 CI 时用 E2E_BASE_URL / E2E_PORT 指定
+const BASE_URL = process.env.E2E_BASE_URL || `http://127.0.0.1:${process.env.E2E_PORT || 8130}`
+const URL = `${BASE_URL}/index.html?palette=campaign`
 let pass = 0
 let fail = 0
 function ok(name, cond, extra = '') {
@@ -12,11 +14,13 @@ function ok(name, cond, extra = '') {
   else { fail++; console.log(`  ✗ ${name}${extra ? ' — ' + extra : ''}`) }
 }
 
-const browser = await chromium.launch({
-  executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+// 浏览器路径不写死：未指定 E2E_CHROME_PATH 时交给 playwright-core 自己找，跨 macOS / Linux / CI 通用
+const launchOpts = {
   headless: true,
   args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox', '--disable-dev-shm-usage']
-})
+}
+if (process.env.E2E_CHROME_PATH) launchOpts.executablePath = process.env.E2E_CHROME_PATH
+const browser = await chromium.launch(launchOpts)
 process.on('uncaughtException', async (e) => {
   console.error('FATAL', e)
   try { await browser.close() } catch (x) {}

@@ -180,6 +180,16 @@ export async function getRecords(dataSetId, adcode) {
 }
 
 /**
+ * 取某数据集下的全部记录（业务数据分级着色前的聚合用，无需按 adcode 拆分）
+ * @param {string} dataSetId
+ * @returns {Promise<import('./dataParser.js').BusinessRecord[]>}
+ */
+export async function getAllRecords(dataSetId) {
+  const db = await getDB()
+  return db.getAllFromIndex(STORE_RECORDS, 'by-dataset', dataSetId)
+}
+
+/**
  * 统计某数据集的记录总数
  * @param {string} dataSetId
  */

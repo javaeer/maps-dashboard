@@ -157,6 +157,16 @@ export const useBusinessDataStore = defineStore('businessData', {
       }
     },
 
+    /** 取某数据集全部记录（分级着色聚合用） */
+    async allRecords(id) {
+      try {
+        return await db.getAllRecords(id)
+      } catch (e) {
+        console.error('[businessDataStore] allRecords', e)
+        return []
+      }
+    },
+
     /** 清空全部业务数据 */
     async clearAll() {
       try {

@@ -11,7 +11,8 @@
     "fetch-town-geo": "node scripts/fetch-town-geo.mjs",
     "fetch-town-info": "node scripts/fetch-town-info.mjs",
     "town-report": "node scripts/build-town-report.mjs",
-    "build-towns": "node scripts/build-towns.mjs"
+    "build-towns": "node scripts/build-towns.mjs",
+    "test:e2e": "node scripts/e2e-military.mjs"
   },
   "keywords": [
     "vue",
@@ -36,6 +37,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.4",
+    "playwright-core": "^1.64.1",
     "vite": "^5.2.11"
   }
 }
